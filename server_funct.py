@@ -1,24 +1,3 @@
-#!/usr/bin/env python3
-"""
-Complete Llama 7B Medical Q&A Federated Learning System
-========================================================
-
-This system combines all components for privacy-preserving medical AI training:
-- Llama 7B for high-quality medical question answering
-- Federated learning for hospital collaboration without data sharing
-- FedAwa adaptive aggregation based on medical specialties
-- Memory optimization for large language models
-
-Usage:
-    python complete_llama7b_medical_qa_system.py
-
-Requirements:
-    - PyTorch
-    - Transformers
-    - Your medical Q&A dataset (medquad.csv)
-    - GPU with at least 16GB VRAM (for 4-bit quantization)
-"""
-
 import torch
 import torch.nn as nn
 import pandas as pd
