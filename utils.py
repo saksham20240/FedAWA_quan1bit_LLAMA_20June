@@ -98,51 +98,119 @@ class MedicalQADataset(Dataset):
 # Model Initialization (Updated for Medical LLMs)
 ##############################################################################
 
+# Add this to your existing utils.py file - replace the init_model function
+
 def init_model(model_type, args):
-    """Initialize Llama model based on type and dataset"""
+    """Initialize model based on type and dataset - Updated for Medical Llama Models"""
     try:
-        # Determine model size based on type
-        if model_type == 'server' or model_type == 'llama_7b':
-            # Server uses larger model (simulating Llama 7B with GPT2-medium)
-            model_name = "gpt2-medium"
-        elif model_type == 'client' or model_type == 'llama_3b':
-            # Clients use smaller model (simulating Llama 3B with GPT2)
-            model_name = "gpt2"
-        else:
-            # Legacy support for CNN/ResNet - convert to LLM
-            if model_type in ['CNN', 'ResNet20', 'ResNet18', 'MLP', 'LeNet5']:
-                model_name = "gpt2"  # Default to small model
+        # Check if this is a medical task
+        is_medical_task = (
+            getattr(args, 'dataset', '') == 'medical_qa' or
+            'medical' in str(getattr(args, 'dataset', '')).lower()
+        )
+        
+        # Get max_length from args
+        max_length = getattr(args, 'max_length', 1024)
+        
+        # Check for FedLAW usage
+        use_fedlaw = (
+            (hasattr(args, 'server_method') and 'fedlaw' in args.server_method) or 
+            (hasattr(args, 'client_method') and 'fedlaw' in args.client_method)
+        )
+        
+        # Medical Llama Models for medical tasks
+        if is_medical_task:
+            from models_dict import (
+                MedicalLlama7B, MedicalLlama3B,
+                MedicalLlama7B_fedlaw, MedicalLlama3B_fedlaw
+            )
+            
+            if model_type in ['server', 'llama_7b']:
+                print("🦙 Creating Llama 7B Server Model for Medical Q&A")
+                model = MedicalLlama7B_fedlaw(max_length) if use_fedlaw else MedicalLlama7B(max_length)
+                
+            elif model_type in ['client', 'llama_3b', 'CNN', 'ResNet20', 'ResNet18', 'MLP', 'LeNet5']:
+                if model_type not in ['client', 'llama_3b']:
+                    print(f"⚠️ Converting {model_type} to Llama 3B for medical tasks")
+                print("🦙 Creating Llama 3B Client Model for Medical Q&A")
+                model = MedicalLlama3B_fedlaw(max_length) if use_fedlaw else MedicalLlama3B(max_length)
+                
             else:
-                raise ValueError(f"Unknown model type: {model_type}")
+                print(f"⚠️ Unknown model type '{model_type}' for medical task. Using Llama 3B.")
+                model = MedicalLlama3B_fedlaw(max_length) if use_fedlaw else MedicalLlama3B(max_length)
         
-        # Load tokenizer and model
-        try:
-            tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-            model = GPT2LMHeadModel.from_pretrained(model_name)
-        except:
-            # Fallback to basic GPT2
-            tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-            model = GPT2LMHeadModel.from_pretrained('gpt2')
-        
-        # Add padding token if it doesn't exist
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            model.config.pad_token_id = model.config.eos_token_id
-        
-        # Set model_id for tracking
-        model.model_id = f'{model_type}_medical_llm'
-        model.tokenizer = tokenizer  # Store tokenizer with model
-        
+        # Original logic for non-medical tasks
+        else:
+            if args.dataset == 'cifar10' or args.dataset == 'fmnist':
+                num_classes = 10
+            elif args.dataset == 'tinyimagenet':
+                num_classes = 200
+            else:
+                num_classes = 100
+
+            if use_fedlaw:
+                if model_type == 'CNN':
+                    if args.dataset == 'cifar10':
+                        from models_dict import CNNCifar10_fedlaw
+                        model = CNNCifar10_fedlaw()
+                    elif args.dataset == 'fmnist':
+                        from models_dict import CNNfmnist_fedlaw
+                        model = CNNfmnist_fedlaw()
+                    else:
+                        from models_dict import CNNCifar100_fedlaw
+                        model = CNNCifar100_fedlaw()
+                elif model_type == 'ResNet20':
+                    from models_dict import ResNet20_fedlaw
+                    model = ResNet20_fedlaw(num_classes)
+                elif model_type == 'ResNet18':
+                    from models_dict import ResNet18_fedlaw
+                    model = ResNet18_fedlaw(num_classes)
+                elif model_type == 'MLP':
+                    from models_dict import MLP_fedlaw
+                    model = MLP_fedlaw()
+                elif model_type == 'LeNet5':
+                    from models_dict import LeNet5_fedlaw
+                    model = LeNet5_fedlaw()
+                else:
+                    raise ValueError(f"Unknown fedlaw model type: {model_type}")
+            else:
+                if model_type == 'CNN':
+                    if args.dataset == 'cifar10':
+                        from models_dict import CNNCifar10
+                        model = CNNCifar10()
+                    elif args.dataset == 'fmnist':
+                        from models_dict import CNNfmnist
+                        model = CNNfmnist()
+                    else:
+                        from models_dict import CNNCifar100
+                        model = CNNCifar100()
+                elif model_type == 'ResNet20':
+                    from models_dict import ResNet20
+                    model = ResNet20(num_classes)
+                elif model_type == 'ResNet18':
+                    from models_dict import ResNet18
+                    model = ResNet18(num_classes)
+                elif model_type == 'MLP':
+                    from models_dict import MLP
+                    model = MLP()
+                elif model_type == 'LeNet5':
+                    from models_dict import LeNet5
+                    model = LeNet5()
+                else:
+                    raise ValueError(f"Unknown model type: {model_type}")
+
+        # Set model_id if not already set
+        if hasattr(model, 'model_id'):
+            print(f"✅ Model created: {model.model_id}")
+        else:
+            model.model_id = f'{model_type}_model'
+            print(f"✅ Model created: {model.model_id}")
+
         return model
+        
     except Exception as e:
-        print(f"Error initializing model: {e}")
-        # Fallback to simplest model
-        tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-        model = GPT2LMHeadModel.from_pretrained('gpt2')
-        tokenizer.pad_token = tokenizer.eos_token
-        model.model_id = f'{model_type}_fallback'
-        model.tokenizer = tokenizer
-        return model
+        print(f"❌ Error initializing model: {e}")
+        raise
 
 def init_optimizer(num_id, model, args):
     """Initialize optimizer for medical language models"""
