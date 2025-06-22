@@ -657,8 +657,8 @@ def test_federated_medical_qa(central_node, sample_questions=None):
 if __name__ == "__main__":
     # Run federated learning
     central_model, clients = run_onebit_medical_qa_federated(
-        num_clients=5, 
-        num_rounds=3,
+        num_clients=10, 
+        num_rounds=5,
         save_path="medical_qa_results/"
     )
     
