@@ -5,12 +5,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 import random
 import time
-import psutil
 import pandas as pd
 from torch.backends import cudnn
 from torch.optim import Optimizer
 from torch.utils.data import Dataset, DataLoader
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 from sklearn.model_selection import train_test_split
 import os
 
@@ -81,10 +80,11 @@ class MedicalQADataset(Dataset):
         answer = str(self.answers[idx])
         
         # Format for medical Q&A: Question → Answer
-        input_text = f"Question: {question}\nAnswer: {answer}"
+        input_text = f"Answer this medical question: {question}"
+        target_text = answer
         
-        # Tokenize
-        encoding = self.tokenizer(
+        # Tokenize input
+        input_encoding = self.tokenizer(
             input_text,
             truncation=True,
             padding='max_length',
@@ -92,20 +92,25 @@ class MedicalQADataset(Dataset):
             return_tensors='pt'
         )
         
-        # Create labels (same as input_ids for causal LM)
-        labels = encoding['input_ids'].clone()
-        labels[labels == self.tokenizer.pad_token_id] = -100
+        # Tokenize target
+        target_encoding = self.tokenizer(
+            target_text,
+            truncation=True,
+            padding='max_length',
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
         
         return {
-            'input_ids': encoding['input_ids'].flatten(),
-            'attention_mask': encoding['attention_mask'].flatten(),
-            'labels': labels.flatten(),
+            'input_ids': input_encoding['input_ids'].flatten(),
+            'attention_mask': input_encoding['attention_mask'].flatten(),
+            'labels': target_encoding['input_ids'].flatten(),
             'question': question,
             'answer': answer
         }
 
 ##############################################################################
-# Model Initialization (Updated for Medical LLMs)
+# Model Initialization
 ##############################################################################
 
 def init_model(model_type, args):
@@ -117,74 +122,58 @@ def init_model(model_type, args):
             'medical' in str(getattr(args, 'dataset', '')).lower()
         )
         
-        # Get max_length from args
-        max_length = getattr(args, 'max_length', 1024)
+        # Get model name from args
+        model_name = getattr(args, 'model_name', 'google/flan-t5-small')
+        max_length = getattr(args, 'max_length', 512)
         
-        # Check for FedLAW usage
-        use_fedlaw = (
-            (hasattr(args, 'server_method') and 'fedlaw' in args.server_method) or 
-            (hasattr(args, 'client_method') and 'fedlaw' in args.client_method)
-        )
+        print(f"🤖 Initializing {model_type} model: {model_name}")
         
-        # Medical Llama Models for medical tasks
-        if is_medical_task:
-            try:
-                from models_dict import (
-                    MedicalLlama7B, MedicalLlama3B,
-                    MedicalLlama7B_fedlaw, MedicalLlama3B_fedlaw
-                )
-                
-                if model_type in ['server', 'llama_7b']:
-                    print("🦙 Creating Llama 7B Server Model for Medical Q&A")
-                    model = MedicalLlama7B_fedlaw(max_length) if use_fedlaw else MedicalLlama7B(max_length)
-                    
-                elif model_type in ['client', 'llama_3b', 'CNN', 'ResNet20', 'ResNet18', 'MLP', 'LeNet5']:
-                    if model_type not in ['client', 'llama_3b']:
-                        print(f"⚠️ Converting {model_type} to Llama 3B for medical tasks")
-                    print("🦙 Creating Llama 3B Client Model for Medical Q&A")
-                    model = MedicalLlama3B_fedlaw(max_length) if use_fedlaw else MedicalLlama3B(max_length)
-                    
-                else:
-                    print(f"⚠️ Unknown model type '{model_type}' for medical task. Using Llama 3B.")
-                    model = MedicalLlama3B_fedlaw(max_length) if use_fedlaw else MedicalLlama3B(max_length)
-                    
-            except ImportError as e:
-                print(f"⚠️ Error importing medical models: {e}")
-                print("   Creating basic GPT-2 model as fallback...")
-                model = create_basic_medical_model(max_length, model_type)
-        
-        # Original logic for non-medical tasks
+        # Create model based on type
+        if model_type in ['server', 'llama_7b']:
+            print("🦙 Creating Server Model (T5-Base equivalent)")
+            model_name = 'google/flan-t5-base'  # Larger model for server
         else:
-            print(f"⚠️ Non-medical task detected. Creating basic model...")
-            model = create_basic_model(model_type, args)
+            print("🦙 Creating Client Model (T5-Small)")
+            model_name = 'google/flan-t5-small'  # Smaller model for client
         
-        # Set model_id if not already set
-        if not hasattr(model, 'model_id'):
-            model.model_id = f'{model_type}_model'
+        # Initialize tokenizer and model
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         
-        print(f"✅ Model created: {model.model_id}")
+        # Try seq2seq first, then causal
+        try:
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+            model_type_used = "seq2seq"
+        except:
+            model = AutoModelForCausalLM.from_pretrained(model_name)
+            model_type_used = "causal"
+        
+        # Setup padding
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            if hasattr(model, 'config'):
+                model.config.pad_token_id = model.config.eos_token_id
+        
+        # Add required attributes
+        model.tokenizer = tokenizer
+        model.model_id = f'{model_type}_medical_qa'
+        model.max_length = max_length
+        model.model_type = model_type_used
+        
+        print(f"✅ Model created: {model.model_id} ({model_type_used})")
         return model
         
     except Exception as e:
         print(f"❌ Error initializing model: {e}")
         # Create a basic fallback model
-        return create_basic_medical_model(getattr(args, 'max_length', 1024), model_type)
+        return create_basic_medical_model(getattr(args, 'max_length', 512), model_type)
 
-def create_basic_medical_model(max_length=1024, model_type='client'):
-    """Create a basic medical model using GPT-2 as fallback"""
+def create_basic_medical_model(max_length=512, model_type='client'):
+    """Create a basic medical model using T5 as fallback"""
     try:
-        from transformers import GPT2LMHeadModel, GPT2Tokenizer
+        model_name = 'google/flan-t5-small'
         
-        # Choose model size based on type
-        if model_type in ['server', 'llama_7b']:
-            model_name = 'gpt2-medium'  # Larger for server
-            model_id = 'basic_medical_server'
-        else:
-            model_name = 'gpt2'  # Smaller for client
-            model_id = 'basic_medical_client'
-        
-        tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        model = GPT2LMHeadModel.from_pretrained(model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         
         # Setup padding
         if tokenizer.pad_token is None:
@@ -193,23 +182,16 @@ def create_basic_medical_model(max_length=1024, model_type='client'):
         
         # Add required attributes
         model.tokenizer = tokenizer
-        model.model_id = model_id
+        model.model_id = f'basic_medical_{model_type}'
         model.max_length = max_length
+        model.model_type = "seq2seq"
         
-        print(f"✅ Created basic medical model: {model_id}")
+        print(f"✅ Created basic medical model: {model.model_id}")
         return model
         
     except Exception as e:
         print(f"❌ Error creating basic medical model: {e}")
         raise
-
-def create_basic_model(model_type, args):
-    """Create basic model for non-medical tasks"""
-    # This is a simplified version for legacy compatibility
-    print(f"Creating basic model for {model_type}")
-    
-    # For now, just return a basic medical model
-    return create_basic_medical_model(getattr(args, 'max_length', 1024), model_type)
 
 def init_optimizer(num_id, model, args):
     """Initialize optimizer for medical language models"""
@@ -261,33 +243,19 @@ def init_optimizer(num_id, model, args):
 def load_medical_data(csv_path, args):
     """Load and split medical Q&A data for federated learning"""
     try:
+        print(f"📊 Loading medical data from {csv_path}")
+        
         # Load the medical dataset
         df = pd.read_csv(csv_path)
         
-        # Auto-detect columns
-        columns = df.columns.tolist()
-        question_col = None
-        answer_col = None
-        
-        for col in columns:
-            col_lower = col.lower()
-            if 'question' in col_lower or 'q' == col_lower:
-                question_col = col
-            elif 'answer' in col_lower or 'a' == col_lower or 'response' in col_lower:
-                answer_col = col
-        
-        # If not found, use first two columns
-        if question_col is None or answer_col is None:
-            if len(columns) >= 2:
-                question_col = columns[0]
-                answer_col = columns[1]
-                print(f"⚠️ Using columns: '{question_col}' → '{answer_col}'")
-            else:
-                raise ValueError("CSV must have at least 2 columns")
+        # Validate columns
+        if 'question' not in df.columns or 'answer' not in df.columns:
+            raise ValueError("Dataset must contain 'question' and 'answer' columns")
         
         # Clean and prepare data
-        df = df[[question_col, answer_col]].dropna()
-        df.columns = ['question', 'answer']
+        df = df[['question', 'answer']].dropna()
+        df['question'] = df['question'].astype(str).str.strip()
+        df['answer'] = df['answer'].astype(str).str.strip()
         
         # Remove empty entries
         df = df[df['question'].str.len() > 0]
@@ -319,29 +287,58 @@ def split_medical_data_federated(questions, answers, args):
         client_datasets = []
         data_per_client = max(10, len(data) // node_num)
         
+        # Medical specialization keywords
+        specialization_keywords = [
+            ['heart', 'blood pressure', 'cardiac', 'cardiovascular'],  # Cardiology
+            ['cancer', 'tumor', 'chemotherapy', 'radiation'],          # Oncology
+            ['brain', 'neurological', 'migraine', 'headache'],         # Neurology
+            ['diabetes', 'insulin', 'glucose', 'hormone'],             # Endocrinology
+            ['general', 'health', 'symptom', 'treatment']              # General
+        ]
+        
         for i in range(node_num):
-            start_idx = i * data_per_client
-            end_idx = min((i + 1) * data_per_client, len(data))
+            # Get specialty keywords for this client
+            specialty_idx = i % len(specialization_keywords)
+            keywords = specialization_keywords[specialty_idx]
             
-            if start_idx >= len(data):
-                # Not enough data, give remaining data to this client
-                client_questions = [item[0] for item in data[len(data)//2:]]
-                client_answers = [item[1] for item in data[len(data)//2:]]
+            # Filter data by specialty if enough data available
+            if len(data) > node_num * 20:  # Only specialize if we have enough data
+                specialized_data = []
+                general_data = []
+                
+                for question, answer in data:
+                    question_lower = question.lower()
+                    if any(keyword in question_lower for keyword in keywords):
+                        specialized_data.append((question, answer))
+                    else:
+                        general_data.append((question, answer))
+                
+                # Give client specialized data + some general data
+                client_size = min(data_per_client, len(specialized_data) + len(general_data) // node_num)
+                specialized_size = min(len(specialized_data), int(client_size * 0.7))
+                general_size = client_size - specialized_size
+                
+                client_data_subset = (
+                    specialized_data[:specialized_size] + 
+                    general_data[:general_size]
+                )
             else:
-                client_questions = [item[0] for item in data[start_idx:end_idx]]
-                client_answers = [item[1] for item in data[start_idx:end_idx]]
+                # Not enough data for specialization, use simple split
+                start_idx = i * data_per_client
+                end_idx = min((i + 1) * data_per_client, len(data))
+                client_data_subset = data[start_idx:end_idx]
             
-            # Add some overlap for better generalization
-            if i > 0 and len(data) > 20:
-                overlap_size = min(5, len(client_questions) // 5)
-                prev_start = max(0, start_idx - overlap_size)
-                overlap_data = data[prev_start:start_idx]
-                client_questions.extend([item[0] for item in overlap_data])
-                client_answers.extend([item[1] for item in overlap_data])
+            # Ensure minimum data per client
+            if len(client_data_subset) < 5:
+                client_data_subset = data[:5] if len(data) >= 5 else data
+            
+            client_questions = [item[0] for item in client_data_subset]
+            client_answers = [item[1] for item in client_data_subset]
             
             client_datasets.append((client_questions, client_answers))
+            print(f"Client {i}: {len(client_questions)} samples (specialty: {specialty_idx})")
         
-        print(f"✅ Split data across {len(client_datasets)} clients")
+        print(f"✅ Split data across {len(client_datasets)} clients with medical specialization")
         return client_datasets
         
     except Exception as e:
@@ -403,11 +400,11 @@ def create_sample_medical_data(args):
     return client_datasets
 
 ##############################################################################
-# Validation Functions (CORRECTED for Medical LLMs)
+# Validation Functions
 ##############################################################################
 
 def validate(args, node, which_dataset='validate'):
-    """Enhanced validation function for medical models - CORRECTED"""
+    """Enhanced validation function for medical models"""
     try:
         node.model.eval()
         
@@ -473,7 +470,7 @@ def validate(args, node, which_dataset='validate'):
         return 75.0  # Default score
 
 def testloss(args, node, which_dataset='validate'):
-    """Test loss computation for medical models - CORRECTED"""
+    """Test loss computation for medical models"""
     try:
         node.model.eval()
         
@@ -520,11 +517,11 @@ def testloss(args, node, which_dataset='validate'):
         return 2.0
 
 ##############################################################################
-# Medical Text Generation Functions (CORRECTED)
+# Medical Text Generation Functions
 ##############################################################################
 
 def generate_medical_answer(args, node, question, max_length=200):
-    """Generate answer for a medical question - CORRECTED"""
+    """Generate answer for a medical question"""
     try:
         node.model.eval()
         
@@ -533,13 +530,13 @@ def generate_medical_answer(args, node, question, max_length=200):
             tokenizer = node.model.tokenizer
         else:
             # Fallback tokenizer
-            from transformers import GPT2Tokenizer
-            tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained('google/flan-t5-small')
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
         
-        # CORRECTED: Better prompt format for medical Q&A
-        prompt = f"Medical Question: {question}\nMedical Answer:"
+        # Format prompt for medical Q&A
+        prompt = f"Answer this medical question: {question}"
         
         # Tokenize
         inputs = tokenizer(
@@ -557,11 +554,11 @@ def generate_medical_answer(args, node, question, max_length=200):
             if hasattr(node.model, 'generate'):
                 outputs = node.model.generate(
                     **inputs,
-                    max_length=len(inputs['input_ids'][0]) + max_length,
+                    max_length=max_length,
                     num_beams=2,
                     temperature=0.7,
                     do_sample=True,
-                    pad_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id,
                     no_repeat_ngram_size=2
                 )
@@ -572,11 +569,9 @@ def generate_medical_answer(args, node, question, max_length=200):
         # Decode the answer
         generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
         
-        # Extract just the answer part - CORRECTED
-        if "Medical Answer:" in generated_text:
-            answer = generated_text.split("Medical Answer:")[-1].strip()
-        elif "Answer:" in generated_text:
-            answer = generated_text.split("Answer:")[-1].strip()
+        # Extract just the answer part if it contains the prompt
+        if prompt in generated_text:
+            answer = generated_text.replace(prompt, "").strip()
         else:
             answer = generated_text.strip()
         
@@ -595,11 +590,11 @@ def generate_medical_answer(args, node, question, max_length=200):
         return "I cannot generate an answer at this time due to a technical issue."
 
 ##############################################################################
-# Utility Functions (CORRECTED)
+# Utility Functions
 ##############################################################################
 
 def model_parameter_vector(args, model):
-    """Extract model parameters as a vector - CORRECTED"""
+    """Extract model parameters as a vector"""
     try:
         # For medical LLMs, extract all trainable parameters
         trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -617,7 +612,7 @@ def medical_model_parameter_vector(args, model):
     return model_parameter_vector(args, model)
 
 def set_model_parameters(model, param_vector):
-    """Set model parameters from vector - CORRECTED"""
+    """Set model parameters from vector"""
     try:
         offset = 0
         for param in model.parameters():
@@ -632,11 +627,11 @@ def set_model_parameters(model, param_vector):
         print(f"❌ Error setting model parameters: {e}")
 
 ##############################################################################
-# Optimizer Classes (CORRECTED)
+# Optimizer Classes
 ##############################################################################
 
 class PerturbedGradientDescent(Optimizer):
-    """Perturbed Gradient Descent optimizer for FedProx - CORRECTED"""
+    """Perturbed Gradient Descent optimizer for FedProx"""
     def __init__(self, params, lr=0.01, mu=0.01):
         if lr < 0.0:
             raise ValueError(f'Invalid learning rate: {lr}')
@@ -662,7 +657,7 @@ class PerturbedGradientDescent(Optimizer):
                         p.data.add_(d_p, alpha=-group['lr'])
 
 ##############################################################################
-# Utility Classes (CORRECTED)
+# Utility Classes
 ##############################################################################
 
 class RunningAverage():
@@ -680,11 +675,11 @@ class RunningAverage():
         return self.total / float(self.steps) if self.steps > 0 else 0
 
 ##############################################################################
-# FedLAW Support Functions (CORRECTED)
+# FedLAW Support Functions
 ##############################################################################
 
 def validate_with_param(args, node, param, which_dataset='validate'):
-    """FedLAW validation with parameters for medical models - CORRECTED"""
+    """FedLAW validation with parameters for medical models"""
     try:
         # For now, use standard validation since parameter injection 
         # for transformers requires more complex implementation
@@ -694,7 +689,7 @@ def validate_with_param(args, node, param, which_dataset='validate'):
         return 75.0
 
 def testloss_with_param(args, node, param, which_dataset='validate'):
-    """FedLAW test loss with parameters for medical models - CORRECTED"""
+    """FedLAW test loss with parameters for medical models"""
     try:
         # For now, use standard test loss
         return testloss(args, node, which_dataset)
@@ -703,18 +698,18 @@ def testloss_with_param(args, node, param, which_dataset='validate'):
         return 2.0
 
 ##############################################################################
-# Data Preparation Functions (CORRECTED)
+# Data Preparation Functions
 ##############################################################################
 
 def prepare_medical_dataloaders(client_data, model, args):
-    """Prepare data loaders for medical federated learning - CORRECTED"""
+    """Prepare data loaders for medical federated learning"""
     try:
         # Get tokenizer from model
         if hasattr(model, 'tokenizer'):
             tokenizer = model.tokenizer
         else:
-            from transformers import GPT2Tokenizer
-            tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained('google/flan-t5-small')
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
         
@@ -763,11 +758,11 @@ def prepare_medical_dataloaders(client_data, model, args):
         return []
 
 ##############################################################################
-# Medical-Specific Utility Functions (CORRECTED)
+# Medical-Specific Utility Functions
 ##############################################################################
 
 def evaluate_medical_generation(args, node, test_questions, max_samples=3):
-    """Evaluate medical answer generation quality - CORRECTED"""
+    """Evaluate medical answer generation quality"""
     try:
         results = []
         sample_size = min(max_samples, len(test_questions))
@@ -795,7 +790,7 @@ def evaluate_medical_generation(args, node, test_questions, max_samples=3):
         return []
 
 def print_medical_evaluation(args, node, sample_questions):
-    """Print sample medical Q&A for evaluation - CORRECTED"""
+    """Print sample medical Q&A for evaluation"""
     try:
         print("\n=== Medical Q&A Evaluation ===")
         results = evaluate_medical_generation(args, node, sample_questions)
@@ -810,7 +805,10 @@ def print_medical_evaluation(args, node, sample_questions):
     except Exception as e:
         print(f"❌ Error printing medical evaluation: {e}")
 
-# Backward compatibility functions for existing code
+##############################################################################
+# Backward Compatibility Functions
+##############################################################################
+
 def get_model_type_from_args(args):
     """Extract model type from args for backward compatibility"""
     if hasattr(args, 'model_type'):
@@ -820,6 +818,19 @@ def get_model_type_from_args(args):
         return 'client'  # Default to client model
     else:
         return 'client'
+
+# Legacy function aliases for backward compatibility
+def create_sample_medical_data_legacy(args):
+    """Legacy alias for create_sample_medical_data"""
+    return create_sample_medical_data(args)
+
+def load_medical_data_legacy(csv_path, args):
+    """Legacy alias for load_medical_data"""
+    return load_medical_data(csv_path, args)
+
+##############################################################################
+# Testing and Validation
+##############################################################################
 
 if __name__ == "__main__":
     # Test the utility functions
@@ -839,6 +850,7 @@ if __name__ == "__main__":
             self.momentum = 0.9
             self.mu = 0.01
             self.lr_decay = 0.95
+            self.model_name = 'google/flan-t5-small'
     
     args = TestArgs()
     
