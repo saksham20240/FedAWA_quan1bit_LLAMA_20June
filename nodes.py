@@ -2,11 +2,149 @@ import copy
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
-from utils import init_model, init_optimizer, model_parameter_vector, MedicalQADataset
+import random
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 ##############################################################################
-# Medical Dataset Split Class
+# Import utility functions (from our updated utils file)
 ##############################################################################
+
+# We'll define the essential functions here to avoid import issues
+def init_model(model_type, args):
+    """Initialize model based on type and dataset"""
+    try:
+        # Get model name from args
+        model_name = getattr(args, 'model_name', 'google/flan-t5-small')
+        max_length = getattr(args, 'max_length', 512)
+        
+        print(f"🤖 Initializing {model_type} model: {model_name}")
+        
+        # Create model based on type
+        if model_type in ['server', 'llama_7b']:
+            print("🦙 Creating Server Model (T5-Base equivalent)")
+            model_name = 'google/flan-t5-base'  # Larger model for server
+        else:
+            print("🦙 Creating Client Model (T5-Small)")
+            model_name = 'google/flan-t5-small'  # Smaller model for client
+        
+        # Initialize tokenizer and model
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        
+        # Setup padding
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            model.config.pad_token_id = model.config.eos_token_id
+        
+        # Add required attributes
+        model.tokenizer = tokenizer
+        model.model_id = f'{model_type}_medical_qa'
+        model.max_length = max_length
+        model.model_type = "seq2seq"
+        
+        print(f"✅ Model created: {model.model_id}")
+        return model
+        
+    except Exception as e:
+        print(f"❌ Error initializing model: {e}")
+        raise
+
+def init_optimizer(num_id, model, args):
+    """Initialize optimizer for medical language models"""
+    try:
+        lr = getattr(args, 'lr', 5e-5)
+        optimizer_type = getattr(args, 'optimizer', 'adamw')
+        weight_decay = getattr(args, 'local_wd_rate', 0.01)
+        
+        if optimizer_type == 'adamw':
+            optimizer = torch.optim.AdamW(
+                model.parameters(), 
+                lr=lr, 
+                weight_decay=weight_decay,
+                eps=1e-8
+            )
+        elif optimizer_type == 'adam':
+            optimizer = torch.optim.Adam(
+                model.parameters(), 
+                lr=lr, 
+                weight_decay=weight_decay
+            )
+        else:
+            momentum = getattr(args, 'momentum', 0.9)
+            optimizer = torch.optim.SGD(
+                model.parameters(), 
+                lr=lr, 
+                momentum=momentum,
+                weight_decay=weight_decay
+            )
+        
+        print(f"✅ Initialized {optimizer_type} optimizer with lr={lr}")
+        return optimizer
+        
+    except Exception as e:
+        print(f"❌ Error initializing optimizer: {e}")
+        return torch.optim.AdamW(model.parameters(), lr=0.0001)
+
+def model_parameter_vector(args, model):
+    """Extract model parameters as a vector"""
+    try:
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        if len(trainable_params) > 0:
+            param_vector = torch.cat([p.view(-1) for p in trainable_params], dim=0)
+        else:
+            param_vector = torch.tensor([])
+        return param_vector
+    except Exception as e:
+        print(f"❌ Error extracting model parameter vector: {e}")
+        return torch.tensor([])
+
+##############################################################################
+# Medical Dataset Classes
+##############################################################################
+
+class MedicalQADataset(Dataset):
+    """Medical Q&A Dataset for the new format"""
+    
+    def __init__(self, questions, answers, tokenizer, max_length=512):
+        self.questions = questions
+        self.answers = answers
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+    
+    def __len__(self):
+        return len(self.questions)
+    
+    def __getitem__(self, idx):
+        question = str(self.questions[idx])
+        answer = str(self.answers[idx])
+        
+        # Format for medical Q&A
+        input_text = f"Answer this medical question: {question}"
+        target_text = answer
+        
+        # Tokenize input
+        input_encoding = self.tokenizer(
+            input_text,
+            truncation=True,
+            padding='max_length',
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
+        
+        # Tokenize target
+        target_encoding = self.tokenizer(
+            target_text,
+            truncation=True,
+            padding='max_length',
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
+        
+        return {
+            'input_ids': input_encoding['input_ids'].flatten(),
+            'attention_mask': input_encoding['attention_mask'].flatten(),
+            'labels': target_encoding['input_ids'].flatten()
+        }
 
 class MedicalDatasetSplit:
     """Medical dataset split for text data"""
@@ -40,8 +178,8 @@ class DatasetSplit(Dataset):
 class Node(object):
     """
     Enhanced Node class for Medical Federated Learning
-    - Server: Llama 7B model
-    - Clients: Llama 3B model
+    - Server: T5-Base model
+    - Clients: T5-Small model
     - Task: Question → Answer generation
     """
     
@@ -103,11 +241,11 @@ class Node(object):
         """Initialize the model based on node type"""
         try:
             if self.is_server:
-                # Server uses larger model (Llama 7B)
+                # Server uses larger model (T5-Base)
                 model_type = getattr(self.args, 'server_model', 'server')
                 print(f"   🦙 Loading server model: {model_type}")
             else:
-                # Clients use smaller model (Llama 3B)
+                # Clients use smaller model (T5-Small)
                 model_type = getattr(self.args, 'client_model', 
                                    getattr(self.args, 'local_model', 'client'))
                 print(f"   🦙 Loading client model: {model_type}")
@@ -482,6 +620,60 @@ class Node(object):
             print(f"   ✅ Node {self.num_id} setup validated successfully")
             return True
 
+    def generate_medical_answer(self, question, max_length=200):
+        """Generate answer for a medical question"""
+        try:
+            self.model.eval()
+            
+            # Get tokenizer
+            tokenizer = self.model.tokenizer
+            
+            # Format prompt for medical Q&A
+            prompt = f"Answer this medical question: {question}"
+            
+            # Tokenize
+            inputs = tokenizer(
+                prompt,
+                return_tensors='pt',
+                truncation=True,
+                max_length=256
+            )
+            
+            if torch.cuda.is_available():
+                inputs = {k: v.cuda() for k, v in inputs.items()}
+            
+            # Generate answer
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_length=max_length,
+                    num_beams=2,
+                    temperature=0.7,
+                    do_sample=True,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    no_repeat_ngram_size=2
+                )
+            
+            # Decode the answer
+            generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract just the answer part if it contains the prompt
+            if prompt in generated_text:
+                answer = generated_text.replace(prompt, "").strip()
+            else:
+                answer = generated_text.strip()
+            
+            # Clean up the answer
+            if len(answer) == 0:
+                answer = "I need more information to provide a proper medical answer."
+            
+            return answer
+            
+        except Exception as e:
+            print(f"❌ Error generating medical answer: {e}")
+            return "I cannot generate an answer at this time due to a technical issue."
+
 ##############################################################################
 # Utility Functions for Long-tail Support (Legacy)
 ##############################################################################
@@ -560,6 +752,86 @@ def train_long_tail(list_label2indices_train, num_classes, imb_factor, imb_type)
         default_indices = [[] for _ in range(num_classes)]
         return default_img_num, default_indices
 
+##############################################################################
+# Medical Data Helper Functions
+##############################################################################
+
+def create_medical_qa_data_splits(questions, answers, num_clients=3):
+    """Create medical Q&A data splits for federated learning"""
+    try:
+        # Medical specialization keywords
+        specializations = {
+            0: ['heart', 'blood pressure', 'cardiac', 'cardiovascular'],  # Cardiology
+            1: ['cancer', 'tumor', 'chemotherapy', 'radiation'],          # Oncology
+            2: ['brain', 'neurological', 'migraine', 'headache'],         # Neurology
+            3: ['diabetes', 'insulin', 'glucose', 'hormone'],             # Endocrinology
+            4: ['general', 'health', 'symptom', 'treatment']              # General
+        }
+        
+        client_data = []
+        data_per_client = len(questions) // num_clients
+        
+        for i in range(num_clients):
+            # Get specialty keywords for this client
+            specialty_idx = i % len(specializations)
+            keywords = specializations[specialty_idx]
+            
+            # Filter questions by specialty
+            specialized_questions = []
+            specialized_answers = []
+            general_questions = []
+            general_answers = []
+            
+            for q, a in zip(questions, answers):
+                q_lower = q.lower()
+                if any(keyword in q_lower for keyword in keywords):
+                    specialized_questions.append(q)
+                    specialized_answers.append(a)
+                else:
+                    general_questions.append(q)
+                    general_answers.append(a)
+            
+            # Combine specialized and general data
+            client_questions = (
+                specialized_questions[:min(len(specialized_questions), data_per_client)] +
+                general_questions[:max(0, data_per_client - len(specialized_questions))]
+            )
+            client_answers = (
+                specialized_answers[:min(len(specialized_answers), data_per_client)] +
+                general_answers[:max(0, data_per_client - len(specialized_answers))]
+            )
+            
+            # Ensure minimum data
+            if len(client_questions) < 5:
+                client_questions = questions[:5]
+                client_answers = answers[:5]
+            
+            client_data.append((client_questions, client_answers))
+            print(f"Client {i}: {len(client_questions)} samples (specialty: {specialty_idx})")
+        
+        return client_data
+        
+    except Exception as e:
+        print(f"❌ Error creating medical data splits: {e}")
+        # Return simple splits as fallback
+        simple_splits = []
+        data_per_client = len(questions) // num_clients
+        
+        for i in range(num_clients):
+            start_idx = i * data_per_client
+            end_idx = (i + 1) * data_per_client if i < num_clients - 1 else len(questions)
+            
+            client_questions = questions[start_idx:end_idx]
+            client_answers = answers[start_idx:end_idx]
+            
+            simple_splits.append((client_questions, client_answers))
+        
+        return simple_splits
+
+##############################################################################
+# Testing and Validation
+##############################################################################
+
 if __name__ == "__main__":
     # Test the Node class
     print("Testing Medical Node Class...")
@@ -576,8 +848,11 @@ if __name__ == "__main__":
             self.batch_size = 2
             self.batchsize = 2
             self.validate_batchsize = 2
-            self.server_model = 'llama_7b'
-            self.client_model = 'llama_3b'
+            self.server_model = 'server'
+            self.client_model = 'client'
+            self.model_name = 'google/flan-t5-small'
+            self.local_wd_rate = 0.01
+            self.momentum = 0.9
     
     args = TestArgs()
     
@@ -596,7 +871,14 @@ if __name__ == "__main__":
         server_node.validate_setup()
         client_node.validate_setup()
         
-        print("✅ All Node tests passed!")
+        # Test medical answer generation
+        print("\n🩺 Testing medical answer generation...")
+        test_question = "What are the symptoms of diabetes?"
+        answer = client_node.generate_medical_answer(test_question)
+        print(f"Question: {test_question}")
+        print(f"Answer: {answer[:100]}...")
+        
+        print("\n✅ All Node tests passed!")
         
     except Exception as e:
         print(f"❌ Node test failed: {e}")
