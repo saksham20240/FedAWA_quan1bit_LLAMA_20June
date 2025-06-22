@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Medical Federated Learning Models Package
-- Llama 7B (Server) and Llama 3B (Client) models
+- Llama 7B (Server) and Llama 3B (Client) models only
 - Medical Q&A specialized architectures
 - FedLAW support for parameter-efficient training
+- Dataset: Medical Q&A (question, answer) pairs only
 """
 
-# Import medical Llama models (only the ones that actually exist)
+# Import medical Llama models only
 try:
     from .llama_models import (
         MedicalLlama7B, 
@@ -16,61 +17,25 @@ try:
         Llama7B_medical,
         Llama3B_medical,
         Llama7B_medical_fedlaw,
-        Llama3B_medical_fedlaw,
-        CNNfmnist_medical,
-        CNNfmnist_fedlaw_medical
+        Llama3B_medical_fedlaw
     )
     _llama_models_available = True
+    print("✅ Medical Llama models loaded successfully")
 except ImportError as e:
-    print(f"Warning: Could not import some Llama models: {e}")
+    print(f"❌ Error: Could not import Llama models: {e}")
     _llama_models_available = False
 
-# Try to import legacy models from a separate module or create redirects
-try:
-    # If you have these models in a separate file, import them
-    # from .legacy_models import (
-    #     CNNCifar10, CNNCifar100, ResNet20, ResNet18, 
-    #     MLP, LeNet5, CNNfmnist
-    # )
-    
-    # For now, create redirects to medical models if legacy models don't exist
-    if _llama_models_available:
-        # Redirect legacy models to medical equivalents
-        CNNCifar10 = MedicalLlama3B
-        CNNCifar100 = MedicalLlama3B  
-        ResNet20 = MedicalLlama3B
-        ResNet18 = MedicalLlama3B
-        MLP = MedicalLlama3B
-        LeNet5 = MedicalLlama3B
-        CNNfmnist = MedicalLlama3B
-        
-        # FedLAW versions
-        CNNCifar10_fedlaw = MedicalLlama3B_fedlaw
-        CNNCifar100_fedlaw = MedicalLlama3B_fedlaw
-        ResNet20_fedlaw = MedicalLlama3B_fedlaw
-        ResNet18_fedlaw = MedicalLlama3B_fedlaw
-        MLP_fedlaw = MedicalLlama3B_fedlaw
-        LeNet5_fedlaw = MedicalLlama3B_fedlaw
-        CNNfmnist_fedlaw = MedicalLlama3B_fedlaw
-        
-        _legacy_models_available = True
-    else:
-        _legacy_models_available = False
-        
-except ImportError as e:
-    print(f"Warning: Could not set up legacy model redirects: {e}")
-    _legacy_models_available = False
-
-# Try to import reparam function for FedLAW
+# Import reparam function for FedLAW
 try:
     from .reparam_function import ReparamModule
+    print("✅ ReparamModule for FedLAW loaded successfully")
 except ImportError:
     # Create a basic version if not available
     import torch.nn as nn
     
     class ReparamModule(nn.Module):
         """Basic ReparamModule for FedLAW compatibility"""
-        def __init__(self):  # Fixed: was **init**
+        def __init__(self):
             super(ReparamModule, self).__init__()
         
         def get_params(self):
@@ -82,8 +47,10 @@ except ImportError:
             current_params = self.get_params()
             for current_p, new_p in zip(current_params, params):
                 current_p.data.copy_(new_p.data)
+    
+    print("⚠️ Using basic ReparamModule implementation")
 
-# Define what's available for import
+# Define available exports (only Llama models)
 _available_exports = ['ReparamModule']
 
 if _llama_models_available:
@@ -95,42 +62,21 @@ if _llama_models_available:
         'Llama7B_medical',
         'Llama3B_medical',
         'Llama7B_medical_fedlaw',
-        'Llama3B_medical_fedlaw',
-        'CNNfmnist_medical',
-        'CNNfmnist_fedlaw_medical'
+        'Llama3B_medical_fedlaw'
     ])
 
-if _legacy_models_available:
-    _available_exports.extend([
-        'CNNCifar10',
-        'CNNCifar100',
-        'ResNet20', 
-        'ResNet18',
-        'MLP',
-        'LeNet5',
-        'CNNfmnist',
-        'CNNCifar10_fedlaw',
-        'CNNCifar100_fedlaw', 
-        'ResNet20_fedlaw',
-        'ResNet18_fedlaw',
-        'MLP_fedlaw',
-        'LeNet5_fedlaw',
-        'CNNfmnist_fedlaw'
-    ])
-
-__all__ = _available_exports  # Fixed: was **all**
+__all__ = _available_exports
 
 # Package metadata
-__version__ = '1.0.0'  # Fixed: was **version**
-__author__ = 'Medical Federated Learning Team'  # Fixed: was **author**
-__description__ = 'Medical Q&A models for federated learning with Llama 7B/3B'  # Fixed: was **description**
+__version__ = '2.0.0'
+__author__ = 'Medical Federated Learning Team'
+__description__ = 'Medical Q&A models for federated learning with Llama 7B/3B only'
 
 def get_available_models():
-    """Get list of available medical models"""
+    """Get list of available medical Llama models"""
     models = {
         'server_models': [],
-        'client_models': [],
-        'legacy_redirects': []
+        'client_models': []
     }
     
     if _llama_models_available:
@@ -147,20 +93,18 @@ def get_available_models():
             'Llama3B_medical_fedlaw'
         ]
     
-    if _legacy_models_available:
-        models['legacy_redirects'] = [
-            'CNNCifar10', 'CNNCifar100', 'ResNet20', 'ResNet18', 
-            'MLP', 'LeNet5', 'CNNfmnist'
-        ]
-    
     return models
 
 def print_model_info():
-    """Print information about available models"""
+    """Print information about available medical models"""
     models = get_available_models()
     
     print("🦙 Medical Federated Learning Models")
-    print("=" * 50)
+    print("=" * 60)
+    print("📊 Dataset: Medical Q&A (question → answer)")
+    print("🏥 Task: Medical Question Answering")
+    print("🔄 Learning: Federated Learning across Hospitals")
+    print("=" * 60)
     
     if models['server_models']:
         print("🌐 Server Models (Llama 7B):")
@@ -176,14 +120,77 @@ def print_model_info():
     else:
         print("\n🏥 Client Models: Not available")
     
-    if models['legacy_redirects']:
-        print("\n⚠️ Legacy Model Redirects:")
-        for model in models['legacy_redirects']:
-            print(f"   - {model} → MedicalLlama3B")
-    else:
-        print("\n⚠️ Legacy Model Redirects: Not available")
-    
-    print("=" * 50)
+    print("\n📋 Supported Features:")
+    print("   ✅ Medical Question Answering")
+    print("   ✅ Federated Learning")
+    print("   ✅ FedLAW Parameter Efficiency")
+    print("   ✅ Hospital Privacy Preservation")
+    print("=" * 60)
 
-if __name__ == "__main__":  # Fixed: was **name**
+def create_medical_qa_model(model_type='client', use_fedlaw=False, max_length=512):
+    """
+    Create a medical Q&A model
+    
+    Args:
+        model_type: 'server' or 'client'
+        use_fedlaw: Whether to use FedLAW version
+        max_length: Maximum sequence length
+    
+    Returns:
+        Medical Llama model instance
+    """
+    
+    if not _llama_models_available:
+        raise ImportError("Llama models are not available. Please check your installation.")
+    
+    if model_type == 'server':
+        if use_fedlaw:
+            return MedicalLlama7B_fedlaw(max_length)
+        else:
+            return MedicalLlama7B(max_length)
+    elif model_type == 'client':
+        if use_fedlaw:
+            return MedicalLlama3B_fedlaw(max_length)
+        else:
+            return MedicalLlama3B(max_length)
+    else:
+        raise ValueError("model_type must be 'server' or 'client'")
+
+def get_model_info():
+    """Get information about the medical federated learning setup"""
+    return {
+        'supported_datasets': ['Medical Q&A'],
+        'supported_models': ['Llama 7B (Server)', 'Llama 3B (Client)'],
+        'task': 'Medical Question Answering',
+        'learning_type': 'Federated Learning',
+        'privacy_preserving': True,
+        'fedlaw_support': True,
+        'hospital_specialization': True
+    }
+
+if __name__ == "__main__":
     print_model_info()
+    
+    # Test model creation
+    try:
+        print("\n🧪 Testing Model Creation:")
+        
+        # Test server model
+        server_model = create_medical_qa_model('server', use_fedlaw=False)
+        print(f"✅ Server model created: {server_model.model_id}")
+        
+        # Test client model
+        client_model = create_medical_qa_model('client', use_fedlaw=False)
+        print(f"✅ Client model created: {client_model.model_id}")
+        
+        # Test FedLAW models
+        server_fedlaw = create_medical_qa_model('server', use_fedlaw=True)
+        print(f"✅ Server FedLAW model created: {server_fedlaw.model_id}")
+        
+        client_fedlaw = create_medical_qa_model('client', use_fedlaw=True)
+        print(f"✅ Client FedLAW model created: {client_fedlaw.model_id}")
+        
+        print("\n🎉 All medical models working correctly!")
+        
+    except Exception as e:
+        print(f"\n❌ Error testing models: {e}")
