@@ -50,11 +50,11 @@ def args_parser():
                         help="Use mixed precision training (fp16)")
     
     # Federated Learning Configuration
-    parser.add_argument('--node_num', type=int, default=5,
+    parser.add_argument('--node_num', type=int, default=20,
                         help="Number of hospitals/clients")
-    parser.add_argument('--T', type=int, default=10,
+    parser.add_argument('--T', type=int, default=20,
                         help="Number of communication rounds")
-    parser.add_argument('--E', type=int, default=3,
+    parser.add_argument('--E', type=int, default=5,
                         help="Number of local epochs per round")
     parser.add_argument('--select_ratio', type=float, default=1.0,
                         help="Ratio of client selection in each round")
