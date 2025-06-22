@@ -22,9 +22,9 @@ class MedicalLlama7B(nn.Module):
         config = GPT2Config(
             vocab_size=32000,  # Llama vocab size
             n_positions=max_length,
-            n_embd=1024,      # Keep 1024 for server
+            n_embd=768,      # Keep 1024 for server
             n_layer=24,       # More layers for server
-            n_head=16,
+            n_head=12,
             activation_function='gelu_new',
             resid_pdrop=0.1,
             embd_pdrop=0.1,
@@ -60,7 +60,7 @@ class MedicalLlama7B(nn.Module):
             'do_sample': True,
             'temperature': 0.7,
             'num_beams': 2,  # Reduced to avoid conflicts
-            'pad_token_id': self.tokenizer.eos_token_id,
+            'pad_token_id': self.tokenizer.pad_token_id,
             'eos_token_id': self.tokenizer.eos_token_id,
             'no_repeat_ngram_size': 2
         }
@@ -80,9 +80,9 @@ class MedicalLlama3B(nn.Module):
         config = GPT2Config(
             vocab_size=32000,  # Llama vocab size
             n_positions=max_length,
-            n_embd=1024,      # FIXED: Use 1024 to match server
+            n_embd=768,      # FIXED: Use 1024 to match server
             n_layer=12,       # Fewer layers for clients
-            n_head=16,        # Same number of heads
+            n_head=12,        # Same number of heads
             activation_function='gelu_new',
             resid_pdrop=0.1,
             embd_pdrop=0.1,
