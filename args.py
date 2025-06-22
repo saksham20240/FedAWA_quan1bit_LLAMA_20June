@@ -7,17 +7,19 @@ def args_parser():
     
     ARCHITECTURE:
     - Server: Llama 7B (Powerful central model)
-    - Clients: Llama 3B (Efficient distributed models)
+    - Clients: Llama 3B (Efficient distributed models)  
     - Task: Medical Question → Answer Generation
-    - Data: Medical Q&A pairs from CSV
+    - Data: Medical Q&A pairs from medquad_new.csv
     """
     parser = argparse.ArgumentParser(
         description="Medical Federated Learning with Llama 7B Server + Llama 3B Clients"
     )
     
     # Medical Data Arguments
-    parser.add_argument('--csv_path', type=str, default='medquad.csv',
-                        help="Path to medical Q&A CSV file")
+    parser.add_argument('--csv_path', type=str, default='medquad_new.csv',
+                        help="Path to medical Q&A CSV file (question, answer columns)")
+    parser.add_argument('--dataset', type=str, default='medical_qa',
+                        help='Dataset type: medical_qa (only supported dataset)')
     parser.add_argument('--max_length', type=int, default=512,
                         help="Maximum sequence length for text tokenization")
     parser.add_argument('--min_answer_length', type=int, default=10,
@@ -25,18 +27,16 @@ def args_parser():
     parser.add_argument('--max_answer_length', type=int, default=200,
                         help="Maximum answer length in words")
     
-    # Data Distribution
-    parser.add_argument('--dataset', type=str, default='medical_qa',
-                        help='Dataset type: medical_qa (default), cifar10, cifar100, etc.')
+    # Data Distribution for Medical Specialization
     parser.add_argument('--iid', type=int, default=0,  
-                        help='1 for IID, 0 for non-IID (recommended for medical)')
-    parser.add_argument('--batchsize', type=int, default=4,  # Reduced for language models
+                        help='1 for IID, 0 for non-IID (recommended for medical specialization)')
+    parser.add_argument('--batchsize', type=int, default=4,
                         help="Batch size for training")
-    parser.add_argument('--batch_size', type=int, default=4,  # Alternative name
+    parser.add_argument('--batch_size', type=int, default=4,
                         help="Batch size for training (alternative)")
     parser.add_argument('--validate_batchsize', type=int, default=4, 
                         help="Batch size for validation")
-    parser.add_argument('--dirichlet_alpha', type=float, default=0.3,  # Lower for more specialization
+    parser.add_argument('--dirichlet_alpha', type=float, default=0.3,
                         help="Dirichlet alpha for non-IID distribution")
     parser.add_argument('--medical_specialization_level', type=float, default=0.7,
                         help="Level of medical specialization (0.0=general, 1.0=highly specialized)")
@@ -50,11 +50,11 @@ def args_parser():
                         help="Use mixed precision training (fp16)")
     
     # Federated Learning Configuration
-    parser.add_argument('--node_num', type=int, default=10,  # Reduced for medical scenario
+    parser.add_argument('--node_num', type=int, default=5,
                         help="Number of hospitals/clients")
-    parser.add_argument('--T', type=int, default=50,  # Reduced for faster training
+    parser.add_argument('--T', type=int, default=10,
                         help="Number of communication rounds")
-    parser.add_argument('--E', type=int, default=5,  # Increased for language models
+    parser.add_argument('--E', type=int, default=3,
                         help="Number of local epochs per round")
     parser.add_argument('--select_ratio', type=float, default=1.0,
                         help="Ratio of client selection in each round")
@@ -63,42 +63,40 @@ def args_parser():
     parser.add_argument('--exp_name', type=str, default='MedicalFederatedLearning',
                         help="Experiment name for logging")
     
-    # Model Configuration - Server: Llama 7B, Clients: Llama 3B
+    # Llama Model Configuration - ONLY LLAMA MODELS SUPPORTED
     parser.add_argument('--local_model', type=str, default='llama_3b',
-                        help='Local/Client model type: llama_3b (default)')
+                        help='Local/Client model type: llama_3b (only option)')
     parser.add_argument('--server_model', type=str, default='llama_7b',
-                        help='Server model type: llama_7b (default)')
+                        help='Server model type: llama_7b (only option)')
     parser.add_argument('--client_model', type=str, default='llama_3b',
-                        help='Client model type: llama_3b (default)')
-    parser.add_argument('--model_architecture', type=str, default='transformer',
-                        help='Model architecture: transformer (default)')
-    parser.add_argument('--vocab_size', type=int, default=50257,  # GPT-2 vocab size for compatibility
-                        help='Vocabulary size (50257 for GPT-2 compatibility)')
+                        help='Client model type: llama_3b (only option)')
+    parser.add_argument('--model_name', type=str, default='google/flan-t5-small',
+                        help='Transformer model name for compatibility')
     parser.add_argument('--server_model_size', type=str, default='7b',
-                        help='Server model size: 7b (default)')
+                        help='Server model size: 7b')
     parser.add_argument('--client_model_size', type=str, default='3b',
-                        help='Client model size: 3b (default)')
+                        help='Client model size: 3b')
     
     # Server Configuration
-    parser.add_argument('--server_method', type=str, default='fedawa',
-                        help="Server aggregation method: fedavg (default), fedawa, fedprox")
+    parser.add_argument('--server_method', type=str, default='fedavg',
+                        help="Server aggregation method: fedavg, fedawa")
     parser.add_argument('--server_valid_ratio', type=float, default=0.1,
                         help="Ratio of validation set in central server")
     parser.add_argument('--server_epochs', type=int, default=1,
                         help="Optimizer epochs on server")
     parser.add_argument('--server_optimizer', type=str, default='adamw',
-                        help="Server optimizer: adamw (default), adam, sgd")
+                        help="Server optimizer: adamw, adam, sgd")
     parser.add_argument('--server_lr', type=float, default=1e-4,
                         help='Server learning rate')
     
     # Client Configuration
     parser.add_argument('--client_method', type=str, default='local_train',
-                        help="Client training method: local_train (default), fedprox")
-    parser.add_argument('--optimizer', type=str, default='adamw',  # Better for language models
-                        help="Client optimizer: adamw (default), adam, sgd")
+                        help="Client training method: local_train, fedprox")
+    parser.add_argument('--optimizer', type=str, default='adamw',
+                        help="Client optimizer: adamw, adam, sgd")
     parser.add_argument('--client_valid_ratio', type=float, default=0.2,
                         help="Ratio of validation set in clients")  
-    parser.add_argument('--lr', type=float, default=5e-5,  # Appropriate for language models
+    parser.add_argument('--lr', type=float, default=5e-5,
                         help='Client local learning rate')
     parser.add_argument('--local_wd_rate', type=float, default=0.01,
                         help='Client local weight decay rate')
@@ -121,11 +119,11 @@ def args_parser():
     parser.add_argument('--generation_num_beams', type=int, default=4,
                         help='Number of beams for beam search in generation')
     parser.add_argument('--torch_dtype', type=str, default='float16',
-                        help='Model dtype: float16 (default), bfloat16, float32')
+                        help='Model dtype: float16, bfloat16, float32')
     
     # Medical Domain Specific Arguments
     parser.add_argument('--medical_domains', type=str, 
-                        default='cardiology,oncology,neurology,endocrinology,general_practice',
+                        default='cardiology,oncology,neurology,endocrinology,general_medicine',
                         help='Comma-separated list of medical domains')
     parser.add_argument('--domain_specialization', type=bool, default=True,
                         help='Enable domain-specific client specialization')
@@ -135,9 +133,9 @@ def args_parser():
     # Evaluation Arguments
     parser.add_argument('--eval_metrics', type=str, default='perplexity,bleu,quality_score',
                         help='Comma-separated evaluation metrics')
-    parser.add_argument('--eval_frequency', type=int, default=5,
+    parser.add_argument('--eval_frequency', type=int, default=3,
                         help='Evaluate model every N rounds')
-    parser.add_argument('--save_model_frequency', type=int, default=10,
+    parser.add_argument('--save_model_frequency', type=int, default=5,
                         help='Save model every N rounds')
     parser.add_argument('--generate_samples', type=bool, default=True,
                         help='Generate sample answers during evaluation')
@@ -145,24 +143,16 @@ def args_parser():
     # Logging and Output Arguments
     parser.add_argument('--save_csv', type=bool, default=True,
                         help='Save metrics to CSV files')
-    parser.add_argument('--csv_output_dir', type=str, default='./results',
+    parser.add_argument('--csv_output_dir', type=str, default='./medical_results',
                         help='Directory for CSV output files')
     parser.add_argument('--log_level', type=str, default='INFO',
                         help='Logging level: DEBUG, INFO, WARNING, ERROR')
     parser.add_argument('--verbose', type=bool, default=True,
                         help='Enable verbose output')
     
-    # Backward Compatibility Arguments (for legacy code)
-    parser.add_argument('--num_classes', type=int, default=10,
-                        help='Number of classes for classification tasks (legacy)')
-    parser.add_argument('--image_size', type=int, default=32,
-                        help='Image size for vision tasks (legacy)')
-    parser.add_argument('--channels', type=int, default=3,
-                        help='Number of image channels (legacy)')
-    
     # Hardware and Performance Arguments
-    parser.add_argument('--num_workers', type=int, default=0,  # 0 to avoid multiprocessing issues
-                        help='Number of data loader workers')
+    parser.add_argument('--num_workers', type=int, default=0,
+                        help='Number of data loader workers (0 recommended)')
     parser.add_argument('--pin_memory', type=bool, default=True,
                         help='Pin memory for faster data transfer')
     
@@ -183,39 +173,50 @@ def validate_and_process_args(args):
     if isinstance(args.eval_metrics, str):
         args.eval_metrics = [metric.strip() for metric in args.eval_metrics.split(',')]
     
-    # Ensure proper model configuration for medical tasks
-    print("🦙 Validating Medical Federated Learning Configuration:")
-    print(f"   Server Model: {args.server_model} ({args.server_model_size})")
-    print(f"   Client Model: {args.client_model} ({args.client_model_size})")
-    print(f"   Dataset: {args.dataset}")
+    # Force medical Q&A dataset
+    if args.dataset != 'medical_qa':
+        print(f"⚠️ Warning: Only 'medical_qa' dataset is supported. Setting dataset to 'medical_qa'")
+        args.dataset = 'medical_qa'
     
-    # Force medical task settings
-    if args.dataset == 'medical_qa':
-        # Ensure local_model matches client_model
-        if args.local_model != args.client_model:
-            print(f"   Setting local_model to match client_model: {args.client_model}")
-            args.local_model = args.client_model
-        
-        # Ensure model architecture is transformer
-        if args.model_architecture != 'transformer':
-            print("   Setting model_architecture to 'transformer' for medical Q&A")
-            args.model_architecture = 'transformer'
-        
-        # Validate batch sizes for language models
-        if args.batchsize > 8:
-            print(f"   Warning: Large batch size ({args.batchsize}) for language models")
-        
-        # Ensure batch_size matches batchsize
-        if args.batch_size != args.batchsize:
-            args.batch_size = args.batchsize
-        
-        # Validate learning rate
-        if args.lr > 1e-3:
-            print(f"   Warning: High learning rate ({args.lr}) for language models")
+    # Force Llama models only
+    if args.server_model not in ['llama_7b', 'server']:
+        print(f"⚠️ Warning: Only Llama 7B is supported for server. Setting server_model to 'llama_7b'")
+        args.server_model = 'llama_7b'
+    
+    if args.client_model not in ['llama_3b', 'client']:
+        print(f"⚠️ Warning: Only Llama 3B is supported for clients. Setting client_model to 'llama_3b'")
+        args.client_model = 'llama_3b'
+    
+    if args.local_model not in ['llama_3b', 'client']:
+        print(f"⚠️ Warning: Only Llama 3B is supported for local models. Setting local_model to 'llama_3b'")
+        args.local_model = 'llama_3b'
+    
+    # Ensure consistency between model parameters
+    args.local_model = args.client_model
+    
+    print("🦙 Medical Federated Learning Configuration:")
+    print(f"   📊 Dataset: {args.dataset}")
+    print(f"   📄 CSV Path: {args.csv_path}")
+    print(f"   🦙 Server Model: Llama 7B")
+    print(f"   🦙 Client Model: Llama 3B")
+    print(f"   🏥 Number of Hospitals: {args.node_num}")
+    print(f"   🔄 Communication Rounds: {args.T}")
+    
+    # Validate batch sizes for language models
+    if args.batchsize > 8:
+        print(f"   ⚠️ Warning: Large batch size ({args.batchsize}) for language models")
+    
+    # Ensure batch_size matches batchsize
+    if args.batch_size != args.batchsize:
+        args.batch_size = args.batchsize
+    
+    # Validate learning rate
+    if args.lr > 1e-3:
+        print(f"   ⚠️ Warning: High learning rate ({args.lr}) for language models")
     
     # Validate node count vs select ratio
     if args.select_ratio > 1.0:
-        print(f"   Warning: select_ratio ({args.select_ratio}) > 1.0. Setting to 1.0.")
+        print(f"   ⚠️ Warning: select_ratio ({args.select_ratio}) > 1.0. Setting to 1.0.")
         args.select_ratio = 1.0
     
     # Validate medical specialization parameters
@@ -227,16 +228,18 @@ def validate_and_process_args(args):
     # Create output directory if it doesn't exist
     if args.save_csv:
         os.makedirs(args.csv_output_dir, exist_ok=True)
-        print(f"   Output directory: {args.csv_output_dir}")
+        print(f"   📁 Output directory: {args.csv_output_dir}")
     
     # Set derived parameters
     args.selected_clients_per_round = max(1, int(args.node_num * args.select_ratio))
     
     # Validate CSV path
     if not os.path.exists(args.csv_path):
-        print(f"   Warning: CSV file {args.csv_path} not found. Will use sample data.")
+        print(f"   ⚠️ Warning: CSV file {args.csv_path} not found. Will use sample data.")
+    else:
+        print(f"   ✅ Medical dataset found: {args.csv_path}")
     
-    print(f"   ✅ Configuration validated")
+    print(f"   ✅ Configuration validated for medical federated learning")
     
     return args
 
@@ -245,44 +248,40 @@ def get_medical_args_preset(preset_name='default'):
     
     presets = {
         'default': {
-            'node_num': 10,
-            'T': 50,
-            'E': 5,
+            'node_num': 5,
+            'T': 10,
+            'E': 3,
             'lr': 5e-5,
             'batchsize': 4,
             'medical_specialization_level': 0.7,
-            'server_model': 'llama_7b',
-            'client_model': 'llama_3b'
+            'csv_path': 'medquad_new.csv'
         },
         'quick_test': {
-            'node_num': 5,
-            'T': 50,
-            'E': 5,
+            'node_num': 3,
+            'T': 5,
+            'E': 2,
             'lr': 1e-4,
             'batchsize': 2,
             'medical_specialization_level': 0.5,
-            'server_model': 'llama_7b',
-            'client_model': 'llama_3b'
+            'csv_path': 'medquad_new.csv'
         },
         'large_hospital_network': {
-            'node_num': 20,
-            'T': 100,
-            'E': 10,
+            'node_num': 10,
+            'T': 20,
+            'E': 5,
             'lr': 3e-5,
             'batchsize': 6,
             'medical_specialization_level': 0.8,
-            'server_model': 'llama_7b',
-            'client_model': 'llama_3b'
+            'csv_path': 'medquad_new.csv'
         },
         'memory_efficient': {
-            'node_num': 10,
-            'T': 50,
-            'E': 5,
+            'node_num': 5,
+            'T': 10,
+            'E': 3,
             'lr': 5e-5,
             'batchsize': 2,  # Smaller batch for memory constraints
             'medical_specialization_level': 0.7,
-            'server_model': 'llama_7b',
-            'client_model': 'llama_3b',
+            'csv_path': 'medquad_new.csv',
             'torch_dtype': 'float16',
             'gradient_clipping': 0.5
         }
@@ -295,6 +294,7 @@ def print_args_summary(args):
     print("=" * 70)
     print("🦙 MEDICAL FEDERATED LEARNING CONFIGURATION")
     print("   Server: Llama 7B | Clients: Llama 3B")
+    print("   Dataset: Medical Q&A (Question → Answer)")
     print("=" * 70)
     print(f"📊 Dataset: {args.dataset}")
     print(f"📄 Data Source: {args.csv_path}")
@@ -304,10 +304,10 @@ def print_args_summary(args):
     print(f"📈 Learning Rate: {args.lr}")
     print(f"📦 Batch Size: {args.batchsize}")
     print("─" * 70)
-    print("🦙 MODEL ARCHITECTURE:")
-    print(f"   Server Model: {args.server_model} ({args.server_model_size})")
-    print(f"   Client Model: {args.client_model} ({args.client_model_size})")
-    print(f"   Architecture: {args.model_architecture}")
+    print("🦙 LLAMA MODEL ARCHITECTURE:")
+    print(f"   Server Model: Llama 7B")
+    print(f"   Client Model: Llama 3B")
+    print(f"   Base Model: {args.model_name}")
     print(f"   Max Length: {args.max_length}")
     print(f"   Data Type: {args.torch_dtype}")
     print("─" * 70)
@@ -321,6 +321,7 @@ def print_args_summary(args):
     print(f"   Medical Specialization: {args.medical_specialization_level}")
     print(f"   Medical Domains: {', '.join(args.medical_domains)}")
     print(f"   Generation Max Length: {args.generation_max_length}")
+    print(f"   Non-IID Distribution: {'Yes' if args.iid == 0 else 'No'}")
     print("─" * 70)
     print(f"💻 Device: {args.device}")
     print(f"🎲 Random Seed: {args.random_seed}")
@@ -335,14 +336,14 @@ def create_args_from_dict(config_dict):
             for key, value in kwargs.items():
                 setattr(self, key, value)
     
-    # Set defaults
+    # Set defaults for medical federated learning
     defaults = {
         'dataset': 'medical_qa',
-        'csv_path': 'medquad.csv',
+        'csv_path': 'medquad_new.csv',
         'max_length': 512,
-        'node_num': 10,
-        'T': 50,
-        'E': 5,
+        'node_num': 5,
+        'T': 10,
+        'E': 3,
         'lr': 5e-5,
         'batchsize': 4,
         'batch_size': 4,
@@ -350,12 +351,13 @@ def create_args_from_dict(config_dict):
         'server_model': 'llama_7b',
         'client_model': 'llama_3b',
         'local_model': 'llama_3b',
+        'model_name': 'google/flan-t5-small',
         'server_method': 'fedavg',
         'client_method': 'local_train',
         'optimizer': 'adamw',
         'random_seed': 42,
         'save_csv': True,
-        'csv_output_dir': './results',
+        'csv_output_dir': './medical_results',
         'device': '0',
         'iid': 0,
         'dirichlet_alpha': 0.3,
@@ -371,15 +373,29 @@ def create_args_from_dict(config_dict):
         'generation_temperature': 0.7,
         'generation_num_beams': 4,
         'torch_dtype': 'float16',
-        'medical_domains': 'cardiology,oncology,neurology,endocrinology,general_practice',
+        'medical_domains': 'cardiology,oncology,neurology,endocrinology,general_medicine',
         'eval_metrics': 'perplexity,bleu,quality_score',
-        'model_architecture': 'transformer',
-        'vocab_size': 50257,
         'server_model_size': '7b',
         'client_model_size': '3b',
         'num_workers': 0,
         'pin_memory': True,
-        'verbose': True
+        'verbose': True,
+        'use_cuda': True,
+        'mixed_precision': True,
+        'domain_specialization': True,
+        'cross_domain_validation': True,
+        'eval_frequency': 3,
+        'save_model_frequency': 5,
+        'generate_samples': True,
+        'log_level': 'INFO',
+        'exp_name': 'MedicalFederatedLearning',
+        'min_answer_length': 10,
+        'max_answer_length': 200,
+        'warmup_steps': 100,
+        'server_epochs': 1,
+        'server_optimizer': 'adamw',
+        'server_lr': 1e-4,
+        'lr_decay': 0.95
     }
     
     # Update with provided config
@@ -393,23 +409,44 @@ def create_args_from_dict(config_dict):
     
     return args
 
+def get_quick_medical_args():
+    """Get quickly configured args for medical federated learning"""
+    return create_args_from_dict({
+        'csv_path': 'medquad_new.csv',
+        'node_num': 3,
+        'T': 5,
+        'E': 2,
+        'batchsize': 2
+    })
+
 if __name__ == '__main__':
     # Example usage
     print("Testing Medical Federated Learning Args Parser...")
     
     try:
         # Test default args
-        print("\n1. Testing default arguments:")
+        print("\n1. Testing default medical configuration:")
         args = create_args_from_dict({})
         print_args_summary(args)
         
-        # Test preset
+        # Test quick preset
         print("\n2. Testing quick_test preset:")
         preset_config = get_medical_args_preset('quick_test')
         args_preset = create_args_from_dict(preset_config)
         print_args_summary(args_preset)
         
-        print("\n✅ Args parser tests passed!")
+        # Test with your dataset
+        print("\n3. Testing with medquad_new.csv:")
+        medical_args = create_args_from_dict({
+            'csv_path': 'medquad_new.csv',
+            'node_num': 5,
+            'T': 10,
+            'batchsize': 4
+        })
+        print_args_summary(medical_args)
+        
+        print("\n✅ Medical args parser tests passed!")
+        print("🦙 Ready for medical federated learning with Llama models!")
         
     except Exception as e:
         print(f"\n❌ Args parser test failed: {e}")
