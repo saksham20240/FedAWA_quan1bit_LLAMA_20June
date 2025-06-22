@@ -50,11 +50,11 @@ def args_parser():
                         help="Use mixed precision training (fp16)")
     
     # Federated Learning Configuration
-    parser.add_argument('--node_num', type=int, default=5,  # Reduced for medical scenario
+    parser.add_argument('--node_num', type=int, default=10,  # Reduced for medical scenario
                         help="Number of hospitals/clients")
-    parser.add_argument('--T', type=int, default=20,  # Reduced for faster training
+    parser.add_argument('--T', type=int, default=50,  # Reduced for faster training
                         help="Number of communication rounds")
-    parser.add_argument('--E', type=int, default=3,  # Increased for language models
+    parser.add_argument('--E', type=int, default=5,  # Increased for language models
                         help="Number of local epochs per round")
     parser.add_argument('--select_ratio', type=float, default=1.0,
                         help="Ratio of client selection in each round")
@@ -80,7 +80,7 @@ def args_parser():
                         help='Client model size: 3b (default)')
     
     # Server Configuration
-    parser.add_argument('--server_method', type=str, default='fedavg',
+    parser.add_argument('--server_method', type=str, default='fedawa',
                         help="Server aggregation method: fedavg (default), fedawa, fedprox")
     parser.add_argument('--server_valid_ratio', type=float, default=0.1,
                         help="Ratio of validation set in central server")
@@ -245,9 +245,9 @@ def get_medical_args_preset(preset_name='default'):
     
     presets = {
         'default': {
-            'node_num': 5,
-            'T': 20,
-            'E': 3,
+            'node_num': 10,
+            'T': 50,
+            'E': 5,
             'lr': 5e-5,
             'batchsize': 4,
             'medical_specialization_level': 0.7,
@@ -255,9 +255,9 @@ def get_medical_args_preset(preset_name='default'):
             'client_model': 'llama_3b'
         },
         'quick_test': {
-            'node_num': 3,
-            'T': 5,
-            'E': 2,
+            'node_num': 5,
+            'T': 50,
+            'E': 5,
             'lr': 1e-4,
             'batchsize': 2,
             'medical_specialization_level': 0.5,
@@ -265,9 +265,9 @@ def get_medical_args_preset(preset_name='default'):
             'client_model': 'llama_3b'
         },
         'large_hospital_network': {
-            'node_num': 10,
-            'T': 50,
-            'E': 5,
+            'node_num': 20,
+            'T': 100,
+            'E': 10,
             'lr': 3e-5,
             'batchsize': 6,
             'medical_specialization_level': 0.8,
@@ -275,9 +275,9 @@ def get_medical_args_preset(preset_name='default'):
             'client_model': 'llama_3b'
         },
         'memory_efficient': {
-            'node_num': 5,
-            'T': 20,
-            'E': 3,
+            'node_num': 10,
+            'T': 50,
+            'E': 5,
             'lr': 5e-5,
             'batchsize': 2,  # Smaller batch for memory constraints
             'medical_specialization_level': 0.7,
@@ -340,9 +340,9 @@ def create_args_from_dict(config_dict):
         'dataset': 'medical_qa',
         'csv_path': 'medquad.csv',
         'max_length': 512,
-        'node_num': 5,
-        'T': 20,
-        'E': 3,
+        'node_num': 10,
+        'T': 50,
+        'E': 5,
         'lr': 5e-5,
         'batchsize': 4,
         'batch_size': 4,
