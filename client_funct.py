@@ -10,12 +10,208 @@ import pandas as pd
 from sklearn.decomposition import NMF
 from collections import defaultdict
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-
-# Import your medical QA dataset classes
-from your_dataset_file import MedicalQAData, MedicalQADataset, create_qa_model_for_medical_data
+from torch.utils.data import Dataset, DataLoader
+import os
 
 ##############################################################################
-# Memory and Model Utilities (Same as before)
+# Medical Q&A Dataset Class for New Format
+##############################################################################
+
+class MedicalQADataset(Dataset):
+    """Dataset class for medical Q&A with question-answer pairs"""
+    
+    def __init__(self, questions, answers, tokenizer, max_length=512):
+        self.questions = questions
+        self.answers = answers
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+    
+    def __len__(self):
+        return len(self.questions)
+    
+    def __getitem__(self, idx):
+        question = str(self.questions[idx])
+        answer = str(self.answers[idx])
+        
+        # Format for medical Q&A
+        input_text = f"Answer this medical question: {question}"
+        target_text = answer
+        
+        # Tokenize input
+        input_encoding = self.tokenizer(
+            input_text,
+            truncation=True,
+            padding='max_length',
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
+        
+        # Tokenize target
+        target_encoding = self.tokenizer(
+            target_text,
+            truncation=True,
+            padding='max_length',
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
+        
+        return {
+            'input_ids': input_encoding['input_ids'].flatten(),
+            'attention_mask': input_encoding['attention_mask'].flatten(),
+            'labels': target_encoding['input_ids'].flatten()
+        }
+
+class MedicalQAData:
+    """Medical Q&A data handler for the new dataset format"""
+    
+    def __init__(self, args, csv_path='medquad_new.csv'):
+        self.args = args
+        self.csv_path = csv_path
+        self.tokenizer = AutoTokenizer.from_pretrained('google/flan-t5-small')
+        
+        # Add padding token if not present
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        
+        # Load and process the dataset
+        self.df = self.load_dataset()
+        self.client_data = self.create_federated_split()
+        
+        print(f"✅ Medical Q&A data loaded: {len(self.df)} total samples")
+        print(f"📊 Split into {len(self.client_data)} clients")
+    
+    def load_dataset(self):
+        """Load the medical Q&A dataset from CSV"""
+        try:
+            if os.path.exists(self.csv_path):
+                df = pd.read_csv(self.csv_path)
+                print(f"📊 Loaded dataset from {self.csv_path}")
+            else:
+                # Create sample data if file doesn't exist
+                print(f"⚠️ File {self.csv_path} not found, creating sample data")
+                df = self.create_sample_data()
+            
+            # Validate columns
+            if 'question' not in df.columns or 'answer' not in df.columns:
+                raise ValueError("Dataset must contain 'question' and 'answer' columns")
+            
+            # Clean the data
+            df = df.dropna(subset=['question', 'answer'])
+            df['question'] = df['question'].astype(str).str.strip()
+            df['answer'] = df['answer'].astype(str).str.strip()
+            
+            # Remove empty entries
+            df = df[(df['question'] != '') & (df['answer'] != '')]
+            
+            return df
+            
+        except Exception as e:
+            print(f"Error loading dataset: {e}")
+            return self.create_sample_data()
+    
+    def create_sample_data(self):
+        """Create sample medical Q&A data"""
+        sample_data = {
+            'question': [
+                'What are the symptoms of diabetes?',
+                'How is high blood pressure treated?',
+                'What causes heart disease?',
+                'What are the side effects of chemotherapy?',
+                'How can stroke be prevented?',
+                'What is pneumonia?',
+                'How is asthma treated?',
+                'What are the symptoms of migraine?',
+                'How is depression diagnosed?',
+                'What causes kidney stones?',
+                'What are the risk factors for osteoporosis?',
+                'How is arthritis treated?',
+                'What causes cancer?',
+                'How is anxiety treated?',
+                'What are the symptoms of heart attack?'
+            ] * 10,  # Repeat to have more samples
+            'answer': [
+                'Diabetes symptoms include frequent urination, excessive thirst, unexplained weight loss, fatigue, blurred vision, and slow-healing wounds.',
+                'High blood pressure is treated with lifestyle changes including diet, exercise, weight management, and medications like ACE inhibitors.',
+                'Heart disease is caused by high cholesterol, high blood pressure, smoking, diabetes, obesity, and family history.',
+                'Chemotherapy side effects include nausea, vomiting, fatigue, hair loss, increased infection risk, and anemia.',
+                'Stroke can be prevented by controlling blood pressure, maintaining healthy weight, exercising, and not smoking.',
+                'Pneumonia is an infection that inflames air sacs in lungs, causing cough with phlegm, fever, and difficulty breathing.',
+                'Asthma is treated with quick-relief bronchodilators for symptoms and long-term control medications for prevention.',
+                'Migraine symptoms include severe throbbing headache, nausea, vomiting, and sensitivity to light and sound.',
+                'Depression is diagnosed through clinical interviews, symptom assessment, and ruling out medical causes.',
+                'Kidney stones are caused by dehydration, high sodium diet, obesity, and certain medical conditions.',
+                'Osteoporosis risk factors include age, gender, menopause, low calcium intake, and sedentary lifestyle.',
+                'Arthritis is treated with medications, physical therapy, exercise, and sometimes surgery for severe cases.',
+                'Cancer is caused by genetic mutations, environmental factors, lifestyle choices, and certain infections.',
+                'Anxiety is treated with therapy, medications, lifestyle changes, and stress management techniques.',
+                'Heart attack symptoms include chest pain, shortness of breath, nausea, and pain in arm or jaw.'
+            ] * 10
+        }
+        
+        return pd.DataFrame(sample_data)
+    
+    def create_federated_split(self):
+        """Split data for federated learning by medical specialties"""
+        # Categorize questions by medical domain
+        specialties = {
+            'cardiology': ['heart', 'blood pressure', 'cardiac', 'cardiovascular', 'stroke'],
+            'endocrinology': ['diabetes', 'hormone', 'thyroid', 'insulin', 'glucose'],
+            'oncology': ['cancer', 'tumor', 'chemotherapy', 'radiation', 'malignant'],
+            'neurology': ['migraine', 'headache', 'brain', 'neurological', 'seizure'],
+            'general': []  # Default category
+        }
+        
+        # Assign questions to specialties
+        df_with_specialty = self.df.copy()
+        df_with_specialty['specialty'] = 'general'
+        
+        for specialty, keywords in specialties.items():
+            if specialty != 'general':
+                mask = df_with_specialty['question'].str.lower().str.contains('|'.join(keywords), na=False)
+                df_with_specialty.loc[mask, 'specialty'] = specialty
+        
+        # Split data among clients
+        client_data = {}
+        specialty_list = list(specialties.keys())
+        
+        for i in range(self.args.node_num):
+            # Assign specialty to client (round-robin)
+            client_specialty = specialty_list[i % len(specialty_list)]
+            
+            # Get data for this specialty
+            specialty_data = df_with_specialty[df_with_specialty['specialty'] == client_specialty]
+            
+            # If not enough data, add from general category
+            if len(specialty_data) < 10:
+                general_data = df_with_specialty[df_with_specialty['specialty'] == 'general']
+                needed = min(20, len(general_data))
+                specialty_data = pd.concat([specialty_data, general_data.head(needed)])
+            
+            # If still not enough, duplicate existing data
+            while len(specialty_data) < 5:
+                specialty_data = pd.concat([specialty_data, specialty_data])
+            
+            client_data[i] = specialty_data.reset_index(drop=True)
+            print(f"Client {i} ({client_specialty}): {len(specialty_data)} samples")
+        
+        return client_data
+    
+    def get_client_dataloader(self, client_id, batch_size=2, shuffle=True):
+        """Get dataloader for a specific client"""
+        if client_id not in self.client_data:
+            # Return empty dataloader
+            empty_dataset = MedicalQADataset([], [], self.tokenizer)
+            return DataLoader(empty_dataset, batch_size=batch_size, shuffle=shuffle)
+        
+        client_df = self.client_data[client_id]
+        questions = client_df['question'].tolist()
+        answers = client_df['answer'].tolist()
+        
+        dataset = MedicalQADataset(questions, answers, self.tokenizer)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
+##############################################################################
+# Memory and Model Utilities
 ##############################################################################
 
 def get_memory_usage():
@@ -397,6 +593,10 @@ def client_localTrain_medical_qa(args, node):
             
             # Backward pass
             loss.backward()
+            
+            # Gradient clipping for stability
+            torch.nn.utils.clip_grad_norm_(node.model.parameters(), max_norm=1.0)
+            
             node.optimizer.step()
             
             total_loss += loss.item()
@@ -435,17 +635,54 @@ def validate_medical_qa(args, node):
         print(f"Error in validation for client {node.client_id}: {e}")
         return 30.0  # Default BLEU score
 
+def generate_medical_answer(node, question):
+    """Generate a medical answer for a given question"""
+    try:
+        node.model.eval()
+        
+        # Format the input
+        input_text = f"Answer this medical question: {question}"
+        
+        # Tokenize
+        inputs = node.tokenizer(
+            input_text,
+            return_tensors='pt',
+            truncation=True,
+            padding=True,
+            max_length=512
+        )
+        
+        # Generate answer
+        with torch.no_grad():
+            outputs = node.model.generate(
+                **inputs,
+                max_length=256,
+                num_beams=4,
+                temperature=0.7,
+                do_sample=True,
+                pad_token_id=node.tokenizer.pad_token_id
+            )
+        
+        # Decode the answer
+        answer = node.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return answer
+        
+    except Exception as e:
+        print(f"Error generating answer: {e}")
+        return "I'm sorry, I cannot provide an answer at this time."
+
 ##############################################################################
 # Main Execution for Medical Q&A
 ##############################################################################
 
-def run_onebit_medical_qa_federated(num_clients=5, num_rounds=5, save_path=""):
+def run_onebit_medical_qa_federated(num_clients=5, num_rounds=5, save_path="", csv_path='medquad_new.csv'):
     """Run OneBit federated learning for medical Q&A answer generation"""
     
     print(f"🏥 Starting Medical Q&A Federated Learning with OneBit")
     print(f"   Clients: {num_clients} hospitals")
     print(f"   Rounds: {num_rounds}")
     print(f"   Task: Question → Answer generation")
+    print(f"   Dataset: {csv_path}")
     
     # Setup arguments for medical Q&A data
     class Args:
@@ -457,13 +694,14 @@ def run_onebit_medical_qa_federated(num_clients=5, num_rounds=5, save_path=""):
             self.max_length = 512
             self.model_name = 'google/flan-t5-small'
             self.E = 3  # Local epochs
+            self.csv_path = csv_path
     
     args = Args()
     
     # Load medical Q&A dataset
     print("📊 Loading medical Q&A dataset...")
     try:
-        medical_data = MedicalQAData(args)
+        medical_data = MedicalQAData(args, csv_path)
         print(f"   Dataset loaded: {len(medical_data.df)} medical Q&A pairs")
     except Exception as e:
         print(f"Error loading medical data: {e}")
@@ -615,37 +853,11 @@ def test_federated_medical_qa(central_node, sample_questions=None):
     print("\n🧪 Testing Federated Medical Q&A System")
     print("=" * 60)
     
-    central_node.model.eval()
-    
     for i, question in enumerate(sample_questions, 1):
         print(f"\n{i}. QUESTION: {question}")
         
         try:
-            # Format input
-            input_text = f"Answer this medical question: {question}"
-            
-            # Tokenize
-            inputs = central_node.tokenizer(
-                input_text,
-                return_tensors='pt',
-                truncation=True,
-                padding=True,
-                max_length=512
-            )
-            
-            # Generate answer
-            with torch.no_grad():
-                outputs = central_node.model.generate(
-                    **inputs,
-                    max_length=256,
-                    num_beams=4,
-                    temperature=0.7,
-                    do_sample=True,
-                    pad_token_id=central_node.tokenizer.eos_token_id
-                )
-            
-            # Decode answer
-            answer = central_node.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            answer = generate_medical_answer(central_node, question)
             print(f"   ANSWER: {answer}")
             
         except Exception as e:
@@ -657,9 +869,10 @@ def test_federated_medical_qa(central_node, sample_questions=None):
 if __name__ == "__main__":
     # Run federated learning
     central_model, clients = run_onebit_medical_qa_federated(
-        num_clients=10, 
-        num_rounds=5,
-        save_path="medical_qa_results/"
+        num_clients=5, 
+        num_rounds=3,
+        save_path="medical_qa_results/",
+        csv_path='medquad_new.csv'
     )
     
     # Test the system
