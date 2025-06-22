@@ -16,7 +16,7 @@ from datetime import datetime
 class MedicalQAPredictor:
     """Medical Q&A System for Answer Prediction from Questions"""
     
-    def __init__(self, data_dir='./medical_data', model_name='google/flan-t5-small', dataset_path=None):
+    def __init__(self, data_dir='/storage/ds_saksham/FedAWA_quan1bit_LLAMA_20June', model_name='google/flan-t5-small', dataset_path='/storage/ds_saksham/FedAWA_quan1bit_LLAMA_20June/medquad_new.csv'):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(exist_ok=True)
         self.model_name = model_name
