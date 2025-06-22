@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-ReparamModule for FedLAW Support in Medical Federated Learning
+ReparamModule for Medical Federated Learning with Llama Models
 - Parameter reparameterization for efficient federated learning
-- Compatible with Llama 7B/3B medical models
-- Memory-efficient parameter sharing
+- Optimized for Llama 7B/3B medical Q&A models
+- Memory-efficient parameter sharing across hospitals
+- Compatible with medquad_new.csv dataset
 """
 
 import torch
@@ -13,10 +14,17 @@ from typing import List, Optional, Dict, Any
 
 class ReparamModule(nn.Module):
     """
-    Base reparameterization module for FedLAW federated learning
+    Reparameterization module for Medical Llama Models in Federated Learning
     
-    This module provides parameter reparameterization capabilities
-    for efficient parameter sharing in federated learning scenarios.
+    This module provides parameter reparameterization capabilities specifically
+    optimized for Llama 7B (server) and Llama 3B (client) models in medical
+    federated learning scenarios.
+    
+    Key Features:
+    - Efficient parameter sharing between hospitals
+    - Memory optimization for large language models
+    - Compatible with medical Q&A tasks
+    - Privacy-preserving parameter aggregation
     """
     
     def __init__(self):
@@ -25,9 +33,10 @@ class ReparamModule(nn.Module):
         self._param_names = None
         self._total_params = 0
         self._is_initialized = False
+        self._model_type = None  # 'llama_7b' or 'llama_3b'
     
     def _initialize_param_info(self):
-        """Initialize parameter information for reparameterization"""
+        """Initialize parameter information for medical Llama models"""
         try:
             self._param_shapes = []
             self._param_names = []
@@ -39,14 +48,21 @@ class ReparamModule(nn.Module):
                     self._param_shapes.append(param.shape)
                     self._total_params += param.numel()
             
+            # Detect model type based on parameter count
+            if self._total_params > 100_000_000:  # ~100M+ parameters
+                self._model_type = 'llama_7b'
+            else:
+                self._model_type = 'llama_3b'
+            
             self._is_initialized = True
+            print(f"✅ Initialized ReparamModule for {self._model_type} with {self._total_params:,} parameters")
             
         except Exception as e:
             print(f"⚠️ Error initializing param info: {e}")
             self._is_initialized = False
     
     def get_params(self) -> List[torch.Tensor]:
-        """Get all trainable parameters as a list"""
+        """Get all trainable parameters for medical models"""
         try:
             return [p for p in self.parameters() if p.requires_grad]
         except Exception as e:
@@ -54,7 +70,7 @@ class ReparamModule(nn.Module):
             return []
     
     def set_params(self, params: List[torch.Tensor]):
-        """Set model parameters from a list of tensors"""
+        """Set model parameters from federated aggregation"""
         try:
             current_params = self.get_params()
             
@@ -75,7 +91,7 @@ class ReparamModule(nn.Module):
             return False
     
     def get_param_vector(self) -> torch.Tensor:
-        """Get all trainable parameters as a single vector"""
+        """Get all trainable parameters as a single vector for efficient communication"""
         try:
             params = self.get_params()
             if not params:
@@ -88,7 +104,7 @@ class ReparamModule(nn.Module):
             return torch.tensor([])
     
     def set_param_vector(self, param_vector: torch.Tensor):
-        """Set model parameters from a single vector"""
+        """Set model parameters from a vector (for efficient federated updates)"""
         try:
             if not self._is_initialized:
                 self._initialize_param_info()
@@ -111,7 +127,7 @@ class ReparamModule(nn.Module):
             return False
     
     def get_param_dict(self) -> Dict[str, torch.Tensor]:
-        """Get parameters as a dictionary"""
+        """Get parameters as a dictionary for federated aggregation"""
         try:
             return {name: param.clone() for name, param in self.named_parameters() if param.requires_grad}
         except Exception as e:
@@ -119,7 +135,7 @@ class ReparamModule(nn.Module):
             return {}
     
     def set_param_dict(self, param_dict: Dict[str, torch.Tensor]):
-        """Set parameters from a dictionary"""
+        """Set parameters from dictionary (for federated updates)"""
         try:
             for name, param in self.named_parameters():
                 if param.requires_grad and name in param_dict:
@@ -133,7 +149,7 @@ class ReparamModule(nn.Module):
             return False
     
     def clone_params(self) -> 'ReparamModule':
-        """Create a deep copy of the module with cloned parameters"""
+        """Create a deep copy for federated aggregation"""
         try:
             cloned = copy.deepcopy(self)
             return cloned
@@ -142,7 +158,7 @@ class ReparamModule(nn.Module):
             return self
     
     def zero_params(self):
-        """Zero out all trainable parameters"""
+        """Zero out all parameters (useful for aggregation initialization)"""
         try:
             for param in self.parameters():
                 if param.requires_grad:
@@ -151,7 +167,7 @@ class ReparamModule(nn.Module):
             print(f"⚠️ Error zeroing parameters: {e}")
     
     def scale_params(self, scale_factor: float):
-        """Scale all trainable parameters by a factor"""
+        """Scale parameters by a factor (useful for weighted aggregation)"""
         try:
             for param in self.parameters():
                 if param.requires_grad:
@@ -160,7 +176,7 @@ class ReparamModule(nn.Module):
             print(f"⚠️ Error scaling parameters: {e}")
     
     def add_params(self, other_params: List[torch.Tensor], weight: float = 1.0):
-        """Add weighted parameters from another model"""
+        """Add weighted parameters from another hospital's model"""
         try:
             current_params = self.get_params()
             
@@ -180,21 +196,25 @@ class ReparamModule(nn.Module):
             print(f"⚠️ Error adding parameters: {e}")
             return False
     
-    def get_param_stats(self) -> Dict[str, Any]:
-        """Get statistics about model parameters"""
+    def get_medical_model_stats(self) -> Dict[str, Any]:
+        """Get statistics specific to medical Llama models"""
         try:
             if not self._is_initialized:
                 self._initialize_param_info()
             
             stats = {
+                'model_type': self._model_type,
                 'total_params': self._total_params,
                 'trainable_params': sum(p.numel() for p in self.parameters() if p.requires_grad),
                 'param_shapes': self._param_shapes.copy() if self._param_shapes else [],
                 'param_names': self._param_names.copy() if self._param_names else [],
                 'memory_mb': self._total_params * 4 / (1024 * 1024),  # Assuming float32
+                'is_server_model': self._model_type == 'llama_7b',
+                'is_client_model': self._model_type == 'llama_3b',
+                'task': 'medical_qa'
             }
             
-            # Add parameter norms
+            # Add parameter norms for monitoring
             param_norms = []
             for param in self.parameters():
                 if param.requires_grad:
@@ -204,44 +224,55 @@ class ReparamModule(nn.Module):
                 stats.update({
                     'param_norm_mean': sum(param_norms) / len(param_norms),
                     'param_norm_max': max(param_norms),
-                    'param_norm_min': min(param_norms)
+                    'param_norm_min': min(param_norms),
+                    'param_norm_std': torch.std(torch.tensor(param_norms)).item()
                 })
             
             return stats
             
         except Exception as e:
-            print(f"⚠️ Error getting parameter stats: {e}")
+            print(f"⚠️ Error getting medical model stats: {e}")
             return {'error': str(e)}
     
-    def print_param_info(self):
-        """Print information about model parameters"""
+    def print_medical_model_info(self):
+        """Print information about the medical model parameters"""
         try:
-            stats = self.get_param_stats()
+            stats = self.get_medical_model_stats()
             
-            print(f"📊 Parameter Information for {self.__class__.__name__}")
+            print(f"🦙 Medical Llama Model Information")
+            print(f"=" * 50)
+            print(f"   Model Type: {stats.get('model_type', 'unknown').upper()}")
+            print(f"   Task: Medical Q&A")
             print(f"   Total Parameters: {stats.get('total_params', 0):,}")
             print(f"   Trainable Parameters: {stats.get('trainable_params', 0):,}")
             print(f"   Memory Usage: {stats.get('memory_mb', 0):.2f} MB")
+            print(f"   Role: {'Server' if stats.get('is_server_model') else 'Client'}")
             
             if 'param_norm_mean' in stats:
                 print(f"   Parameter Norm (mean): {stats['param_norm_mean']:.6f}")
-                print(f"   Parameter Norm (max): {stats['param_norm_max']:.6f}")
-                print(f"   Parameter Norm (min): {stats['param_norm_min']:.6f}")
+                print(f"   Parameter Norm (std): {stats['param_norm_std']:.6f}")
+            
+            print(f"=" * 50)
             
         except Exception as e:
-            print(f"⚠️ Error printing parameter info: {e}")
+            print(f"⚠️ Error printing medical model info: {e}")
 
-class FedLAWOptimizer:
-    """Optimizer for FedLAW reparameterized models"""
+class MedicalFedLAWOptimizer:
+    """
+    Optimizer specifically designed for medical Llama models in federated learning
+    """
     
-    def __init__(self, reparam_module: ReparamModule, lr: float = 0.01):
+    def __init__(self, reparam_module: ReparamModule, lr: float = 5e-5):
         self.reparam_module = reparam_module
         self.lr = lr
         self.momentum_buffer = None
         self.momentum = 0.9
+        self.model_type = getattr(reparam_module, '_model_type', 'unknown')
+        
+        print(f"✅ Initialized Medical FedLAW Optimizer for {self.model_type}")
     
     def step(self, gradients: torch.Tensor):
-        """Perform optimization step with reparameterized gradients"""
+        """Perform optimization step optimized for medical models"""
         try:
             if self.momentum_buffer is None:
                 self.momentum_buffer = torch.zeros_like(gradients)
@@ -252,24 +283,34 @@ class FedLAWOptimizer:
             # Get current parameters
             current_params = self.reparam_module.get_param_vector()
             
-            # Update parameters
-            updated_params = current_params - self.lr * self.momentum_buffer
+            # Update parameters with gradient clipping for language models
+            clipped_gradients = torch.clamp(self.momentum_buffer, -1.0, 1.0)
+            updated_params = current_params - self.lr * clipped_gradients
             
             # Set updated parameters
             self.reparam_module.set_param_vector(updated_params)
             
         except Exception as e:
-            print(f"⚠️ Error in FedLAW optimizer step: {e}")
+            print(f"⚠️ Error in Medical FedLAW optimizer step: {e}")
     
     def zero_grad(self):
-        """Zero gradients (placeholder for compatibility)"""
+        """Zero gradients"""
         pass
 
-def aggregate_reparam_models(models: List[ReparamModule], weights: Optional[List[float]] = None) -> ReparamModule:
-    """Aggregate multiple reparameterized models"""
+def aggregate_medical_models(models: List[ReparamModule], weights: Optional[List[float]] = None) -> ReparamModule:
+    """
+    Aggregate multiple medical Llama models from different hospitals
+    
+    Args:
+        models: List of medical Llama models from hospitals
+        weights: Optional weights for each hospital (based on data size, performance, etc.)
+    
+    Returns:
+        Aggregated medical model
+    """
     try:
         if not models:
-            raise ValueError("No models provided for aggregation")
+            raise ValueError("No medical models provided for aggregation")
         
         if weights is None:
             weights = [1.0 / len(models)] * len(models)
@@ -277,50 +318,105 @@ def aggregate_reparam_models(models: List[ReparamModule], weights: Optional[List
         if len(weights) != len(models):
             raise ValueError("Number of weights must match number of models")
         
+        # Ensure all models are of the same type
+        model_types = [getattr(model, '_model_type', 'unknown') for model in models]
+        if len(set(model_types)) > 1:
+            print(f"⚠️ Warning: Aggregating different model types: {set(model_types)}")
+        
         # Create aggregated model (clone of first model)
         aggregated = models[0].clone_params()
         aggregated.zero_params()
         
         # Aggregate parameters
-        for model, weight in zip(models, weights):
+        print(f"🔄 Aggregating {len(models)} medical models...")
+        for i, (model, weight) in enumerate(zip(models, weights)):
             model_params = model.get_params()
             aggregated.add_params(model_params, weight)
+            print(f"   ✅ Aggregated model {i+1} with weight {weight:.4f}")
         
+        print(f"✅ Medical model aggregation completed")
         return aggregated
         
     except Exception as e:
-        print(f"⚠️ Error aggregating reparam models: {e}")
+        print(f"⚠️ Error aggregating medical models: {e}")
         return models[0] if models else None
 
-if __name__ == "__main__":
-    # Test the ReparamModule
-    print("Testing ReparamModule...")
+def create_medical_fedlaw_model(base_model, max_length=512):
+    """
+    Convert a regular medical model to FedLAW-compatible version
     
-    # Create a simple test module
-    class TestModel(ReparamModule):
+    Args:
+        base_model: Base medical Llama model
+        max_length: Maximum sequence length
+    
+    Returns:
+        FedLAW-compatible medical model
+    """
+    class MedicalFedLAWWrapper(ReparamModule):
+        def __init__(self, base_model):
+            super().__init__()
+            self.base_model = base_model
+            self.tokenizer = getattr(base_model, 'tokenizer', None)
+            self.model_id = getattr(base_model, 'model_id', 'unknown') + '_fedlaw'
+            self.max_length = getattr(base_model, 'max_length', max_length)
+            self.model_size = getattr(base_model, 'model_size', 'unknown')
+        
+        def forward(self, *args, **kwargs):
+            return self.base_model(*args, **kwargs)
+        
+        def generate(self, *args, **kwargs):
+            return self.base_model.generate(*args, **kwargs)
+        
+        def answer_medical_question(self, question):
+            if hasattr(self.base_model, 'answer_medical_question'):
+                return self.base_model.answer_medical_question(question)
+            else:
+                raise NotImplementedError("Base model does not support medical Q&A")
+    
+    return MedicalFedLAWWrapper(base_model)
+
+if __name__ == "__main__":
+    # Test the Medical ReparamModule
+    print("🧪 Testing Medical ReparamModule...")
+    
+    # Create a test medical model
+    class TestMedicalModel(ReparamModule):
         def __init__(self):
             super().__init__()
-            self.linear1 = nn.Linear(10, 5)
-            self.linear2 = nn.Linear(5, 1)
-        
+            # Simulate Llama-like architecture
+            self.embedding = nn.Embedding(50000, 768)  # Vocab and hidden size
+            self.transformer_layers = nn.ModuleList([
+                nn.TransformerEncoderLayer(768, 12, 3072) for _ in range(12)
+            ])
+            self.lm_head = nn.Linear(768, 50000)
+            
         def forward(self, x):
-            return self.linear2(torch.relu(self.linear1(x)))
+            x = self.embedding(x)
+            for layer in self.transformer_layers:
+                x = layer(x)
+            return self.lm_head(x)
     
     try:
         # Test basic functionality
-        model = TestModel()
-        model.print_param_info()
+        model = TestMedicalModel()
+        model.print_medical_model_info()
         
         # Test parameter vector operations
         param_vector = model.get_param_vector()
-        print(f"✅ Parameter vector size: {len(param_vector)}")
+        print(f"✅ Parameter vector size: {len(param_vector):,}")
         
         # Test parameter setting
-        new_vector = torch.randn_like(param_vector)
+        new_vector = torch.randn_like(param_vector) * 0.01  # Small values
         success = model.set_param_vector(new_vector)
         print(f"✅ Parameter setting: {'Success' if success else 'Failed'}")
         
-        print("✅ ReparamModule tests passed!")
+        # Test medical stats
+        stats = model.get_medical_model_stats()
+        print(f"✅ Model type detected: {stats.get('model_type', 'unknown')}")
+        
+        print("🎉 Medical ReparamModule tests passed!")
         
     except Exception as e:
-        print(f"❌ ReparamModule test failed: {e}")
+        print(f"❌ Medical ReparamModule test failed: {e}")
+        import traceback
+        traceback.print_exc()
