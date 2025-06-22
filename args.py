@@ -42,7 +42,7 @@ def args_parser():
                         help="Level of medical specialization (0.0=general, 1.0=highly specialized)")
     
     # System Configuration
-    parser.add_argument('--device', type=str, default='0',
+    parser.add_argument('--device', type=str, default='4',
                         help="CUDA device: {0, 1, 2, ...} or 'cpu'")
     parser.add_argument('--use_cuda', type=bool, default=True,
                         help="Use CUDA if available")
