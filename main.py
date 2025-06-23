@@ -467,7 +467,7 @@ def enhanced_args_parser():
                 self.client_valid_ratio = 0.2
                 
                 # System options (GPU focused)
-                self.device = '4'
+                self.device = '3'
                 self.random_seed = 42
                 self.save_csv = True
                 self.use_gpu = True
