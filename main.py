@@ -50,7 +50,7 @@ def setup_gpu():
 def clear_gpu_memory():
     """Clear GPU memory cache"""
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        #torch.cuda.empty_cache()
         gc.collect()
 
 def print_gpu_memory_usage(prefix=""):
@@ -1040,7 +1040,7 @@ def run_medical_federated_learning(args):
                 print(f"Error in metrics collection/CSV generation for round {round_num + 1}: {e}")
         
         # Clean GPU memory at end of round
-        clear_gpu_memory()
+        #clear_gpu_memory()
         print_gpu_memory_usage(f"Round {round_num + 1} end - ")
     
     print("\n✅ Medical Federated Learning completed!")
@@ -1097,6 +1097,6 @@ if __name__ == '__main__':
         import traceback
         traceback.print_exc()
         # Emergency GPU cleanup
-        clear_gpu_memory()
+        #lear_gpu_memory()
     
     print("\n🏁 Program finished.")
