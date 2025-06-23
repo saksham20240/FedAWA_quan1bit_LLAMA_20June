@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 import time
 import gc
