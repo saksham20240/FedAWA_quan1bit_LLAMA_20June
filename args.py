@@ -42,7 +42,8 @@ def args_parser():
                         help="Level of medical specialization (0.0=general, 1.0=highly specialized)")
     
     # System Configuration
-    parser.add_argument('--device', type=str, default='3')
+    parser.add_argument('--device', type=str, default='0',
+                        
     parser.add_argument('--use_cuda', type=bool, default=True,
                         help="Use CUDA if available")
     parser.add_argument('--mixed_precision', type=bool, default=True,
@@ -340,9 +341,9 @@ def create_args_from_dict(config_dict):
         'dataset': 'medical_qa',
         'csv_path': 'medquad_new.csv',
         'max_length': 512,
-        'node_num': 5,
-        'T': 10,
-        'E': 3,
+        'node_num': 20,
+        'T': 15,
+        'E': 10,
         'lr': 5e-5,
         'batchsize': 4,
         'batch_size': 4,
